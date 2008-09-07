@@ -333,13 +333,13 @@ CHECK		= sparse
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void $(CF)
 MODFLAGS	= -DMODULE
-CFLAGS_MODULE   = $(MODFLAGS)
-AFLAGS_MODULE   = $(MODFLAGS)
-LDFLAGS_MODULE  = -T $(srctree)/scripts/module-common.lds
-CFLAGS_KERNEL	=
-AFLAGS_KERNEL	=
-CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
 
+CFLAGS_MODULE	= $(MODFLAGS) $(CUSTOM_CFLAGS)
+AFLAGS_MODULE	= $(MODFLAGS) $(CUSTOM_AFLAGS)
+LDFLAGS_MODULE	= -T $(srctree)/scripts/module-common.lds $(CUSTOM_LDFLAGS)
+CFLAGS_KERNEL	= $(CUSTOM_CFLAGS)
+AFLAGS_KERNEL	= $(CUSTOM_AFLAGS)
+CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
 
 # Use LINUXINCLUDE when you must reference the include/ directory.
 # Needed to be compatible with the O= option
@@ -348,6 +348,10 @@ LINUXINCLUDE    := -I$(srctree)/arch/$(hdr-arch)/include -Iinclude \
                    -include include/generated/autoconf.h
 
 KBUILD_CPPFLAGS := -D__KERNEL__
+
+# Apply custom flags
+KBUILD_CFLAGS    += $(CUSTOM_CFLAGS)
+KBUILD_AFLAGS    += $(CUSTOM_AFLAGS)
 
 KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common \
@@ -604,7 +608,7 @@ endif
 LDFLAGS_BUILD_ID = $(patsubst -Wl$(comma)%,%,\
 			      $(call cc-ldoption, -Wl$(comma)--build-id,))
 LDFLAGS_MODULE += $(LDFLAGS_BUILD_ID)
-LDFLAGS_vmlinux += $(LDFLAGS_BUILD_ID)
+LDFLAGS_vmlinux += $(LDFLAGS_BUILD_ID) $(CUSTOM_LDFLAGS)
 
 ifeq ($(CONFIG_STRIP_ASM_SYMS),y)
 LDFLAGS_vmlinux	+= $(call ld-option, -X,)
