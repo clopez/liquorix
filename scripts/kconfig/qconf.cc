@@ -1450,14 +1450,14 @@ void ConfigMainWindow::loadConfig(void)
 	if (s.isNull())
 		return;
 	if (conf_read(QFile::encodeName(s)))
-		QMessageBox::information(this, "qconf", _("Unable to load configuration!"));
+		QMessageBox::information(this, "QConf Error", _("Unable to load configuration!"));
 	ConfigView::updateListAll();
 }
 
 void ConfigMainWindow::saveConfig(void)
 {
 	if (conf_write(NULL))
-		QMessageBox::information(this, "qconf", _("Unable to save configuration!"));
+		QMessageBox::information(this, "QConf Error", _("Unable to save configuration!"));
 }
 
 void ConfigMainWindow::saveConfigAs(void)
@@ -1466,7 +1466,7 @@ void ConfigMainWindow::saveConfigAs(void)
 	if (s.isNull())
 		return;
 	if (conf_write(QFile::encodeName(s)))
-		QMessageBox::information(this, "qconf", _("Unable to save configuration!"));
+		QMessageBox::information(this, "QConf Error", _("Unable to save configuration!"));
 }
 
 void ConfigMainWindow::searchConfig(void)
@@ -1612,7 +1612,7 @@ void ConfigMainWindow::closeEvent(QCloseEvent* e)
 		e->accept();
 		return;
 	}
-	QMessageBox mb("qconf", _("Save configuration?"), QMessageBox::Warning,
+	QMessageBox mb("Save .config?", _("Save configuration?"), QMessageBox::Warning,
 			QMessageBox::Yes | QMessageBox::Default, QMessageBox::No, QMessageBox::Cancel | QMessageBox::Escape);
 	mb.setButtonText(QMessageBox::Yes, _("&Save Changes"));
 	mb.setButtonText(QMessageBox::No, _("&Discard Changes"));
@@ -1631,7 +1631,8 @@ void ConfigMainWindow::closeEvent(QCloseEvent* e)
 
 void ConfigMainWindow::showIntro(void)
 {
-	static const QString str = _("Welcome to the qconf graphical kernel configuration tool for Linux.\n\n"
+	static char str[1000];
+	sprintf(str, "Welcome to the qconf graphical kernel configuration tool for Linux. v%s \"%s\".\n\n"
 		"For each option, a blank box indicates the feature is disabled, a check\n"
 		"indicates it is enabled, and a dot indicates that it is to be compiled\n"
 		"as a module.  Clicking on the box will cycle through the three states.\n\n"
@@ -1641,9 +1642,11 @@ void ConfigMainWindow::showIntro(void)
 		"options must be enabled to support the option you are interested in, you can\n"
 		"still view the help of a grayed-out option.\n\n"
 		"Toggling Show Debug Info under the Options menu will show the dependencies,\n"
-		"which you can then match by examining other options.\n\n");
+		"which you can then match by examining other options.\n\n",
+                getenv("KERNELVERSION"), getenv("NAME"));
 
-	QMessageBox::information(this, "qconf", str);
+
+	QMessageBox::information(this, "Introduction", str);
 }
 
 void ConfigMainWindow::showAbout(void)
@@ -1651,7 +1654,7 @@ void ConfigMainWindow::showAbout(void)
 	static const QString str = _("qconf is Copyright (C) 2002 Roman Zippel <zippel@linux-m68k.org>.\n\n"
 		"Bug reports and feature request can also be entered at http://bugzilla.kernel.org/\n");
 
-	QMessageBox::information(this, "qconf", str);
+	QMessageBox::information(this, "About", str);
 }
 
 void ConfigMainWindow::saveSettings(void)
@@ -1718,6 +1721,11 @@ int main(int ac, char** av)
 {
 	ConfigMainWindow* v;
 	const char *name;
+        static char title[100];
+
+        sprintf(title,"Linux Kernel %s \"%s\" Configuration",
+                getenv("KERNELVERSION"), getenv("NAME")
+        );
 
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
@@ -1749,6 +1757,7 @@ int main(int ac, char** av)
 	configSettings->beginGroup("/kconfig/qconf");
 	v = new ConfigMainWindow();
 
+        v->setCaption(title);
 	//zconfdump(stdout);
 	configApp->setMainWidget(v);
 	configApp->connect(configApp, SIGNAL(lastWindowClosed()), SLOT(quit()));
