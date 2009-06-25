@@ -274,6 +274,8 @@ zen_notes[] = N_(
 	"-------\n"
 	"* All non-vanilla IO schedulers are broken, they will be fixed\n"
 	"  as soon as possible.\n"
+	"* Toshiba ACPI laptop driver is broken from RFKILL update, it\n"
+	"  will be fixed after the IO schedulers are working.\n"
 	"\n");
 
 static int indent;
