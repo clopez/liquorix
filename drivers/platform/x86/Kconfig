@@ -365,6 +365,22 @@ config THINKPAD_ACPI_HOTKEY_POLL
 	  If you are not sure, say Y here.  The driver enables polling only if
 	  it is strictly necessary to do so.
 
+config LENOVO_SL_LAPTOP
+	tristate "Thinkpad SL Series Laptop Extras"
+	depends on !ACPI_VIDEO && THINKPAD_ACPI && EXPERIMENTAL
+	---help---
+	  This is an experimental driver for the Lenovo ThinkPad SL
+	  series, since those laptops are currently not supported by
+	  the thinkpad_acpi driver.
+
+	  Works: hotkeys, bluetooth, The Lenovo Care LED, the fan
+	  Experimental: backlight brightness
+	  Not implemented: hdaps accelerometer
+
+	  NB: to make the Lenovo Care LED blink, make sure the LED timer
+	  trigger is enabled (CONFIG_LEDS_TRIGGERS_TIMER) and do
+	  echo "timer" > /sys/class/leds/lensl::lenovocare/trigger
+
 config INTEL_MENLOW
 	tristate "Thermal Management driver for Intel menlow platform"
 	depends on ACPI_THERMAL
