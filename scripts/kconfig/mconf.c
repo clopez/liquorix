@@ -268,6 +268,12 @@ search_help[] = N_(
 	"Examples: USB	=> find all CONFIG_ symbols containing USB\n"
 	"          ^USB => find all CONFIG_ symbols starting with USB\n"
 	"          USB$ => find all CONFIG_ symbols ending with USB\n"
+	"\n"),
+zen_notes[] = N_(
+	"WARNING\n"
+	"-------\n"
+	"* All non-vanilla IO schedulers are broken, they will be fixed\n"
+	"  as soon as possible.\n"
 	"\n");
 
 static int indent;
@@ -542,6 +548,8 @@ static void conf(struct menu *menu)
 			item_make(_("    Save an Alternate Configuration File"));
 			item_set_tag('S');
 		}
+		dialog_clear();
+		show_helptext(_("Zen Notes"), zen_notes);
 		dialog_clear();
 		res = dialog_menu(prompt ? _(prompt) : _("Main Menu"),
 				  _(menu_instructions),
