@@ -548,9 +548,6 @@ static void conf(struct menu *menu)
 			item_make(_("    Save an Alternate Configuration File"));
 			item_set_tag('S');
 		}
-		dialog_clear();
-		show_helptext(_("Zen Notes"), zen_notes);
-		dialog_clear();
 		res = dialog_menu(prompt ? _(prompt) : _("Main Menu"),
 				  _(menu_instructions),
 				  active_menu, &s_scroll);
@@ -836,6 +833,11 @@ int main(int ac, char **av)
 	}
 
 	set_config_filename(conf_get_configname());
+
+	dialog_clear();
+	show_helptext(_("Zen Notes"), zen_notes);
+	dialog_clear();
+
 	do {
 		conf(&rootmenu);
 		dialog_clear();
