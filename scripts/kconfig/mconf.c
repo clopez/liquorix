@@ -302,6 +302,7 @@ static void process_zen_notes(void) {
       dialog_clear();
       show_helptext(_("Zen Notes"), message);
       free(message);
+      dialog_clear();
     }
   }
 }
@@ -389,9 +390,8 @@ static void set_config_filename(const char *config_filename)
 	sym = sym_lookup("KERNELVERSION", 0);
 	sym_calc_value(sym);
 	size = snprintf(menu_backtitle, sizeof(menu_backtitle),
-	                _("%s - Linux Kernel v%s \"%s\" Configuration"),
-		        config_filename, sym_get_string_value(sym), getenv("NAME"));
-
+	                _("%s - Linux Kernel v%s Configuration"),
+		        config_filename, sym_get_string_value(sym));
 	if (size >= sizeof(menu_backtitle))
 		menu_backtitle[sizeof(menu_backtitle)-1] = '\0';
 	set_dialog_backtitle(menu_backtitle);
@@ -637,6 +637,7 @@ static void conf(struct menu *menu)
 			item_make(_("    Save an Alternate Configuration File"));
 			item_set_tag('S');
 		}
+		dialog_clear();
 		res = dialog_menu(prompt ? _(prompt) : _("Main Menu"),
 				  _(menu_instructions),
 				  active_menu, &s_scroll);
@@ -921,11 +922,9 @@ int main(int ac, char **av)
 		return 1;
 	}
 
-	set_config_filename(conf_get_configname());
-
 	process_zen_notes();
-	dialog_clear();
 
+	set_config_filename(conf_get_configname());
 	do {
 		conf(&rootmenu);
 		dialog_clear();
