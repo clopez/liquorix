@@ -302,7 +302,6 @@ static void process_zen_notes(void) {
       dialog_clear();
       show_helptext(_("Zen Notes"), message);
       free(message);
-      dialog_clear();
     }
   }
 }
@@ -925,6 +924,7 @@ int main(int ac, char **av)
 	set_config_filename(conf_get_configname());
 
 	process_zen_notes();
+	dialog_clear();
 
 	do {
 		conf(&rootmenu);
