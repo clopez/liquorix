@@ -18,11 +18,11 @@
 #include <unistd.h>
 #include <locale.h>
 
-#include <sys/stat.h>
-
 #define LKC_DIRECT_LINK
 #include "lkc.h"
 #include "lxdialog/dialog.h"
+
+#include "zen.h"
 
 static const char mconf_readme[] = N_(
 "Overview\n"
@@ -286,26 +286,6 @@ static void conf_save(void);
 static void show_textbox(const char *title, const char *text, int r, int c);
 static void show_helptext(const char *title, const char *text);
 static void show_help(struct menu *menu);
-
-static void process_zen_notes(void) {
-  const char* filename = "README.zen";
-  struct stat statbuf;
-  int i = stat(filename, &statbuf);
-  if ( i == 0 ) {
-    char *message = calloc(statbuf.st_size+1, sizeof(char));
-    if (message) {
-      FILE* file = fopen(filename, "r");
-      size_t nread = 0;
-      while (!feof(file) && !ferror(file)) {
-	nread = fread(message+nread, sizeof(char), statbuf.st_size-nread, file);
-      }
-      dialog_clear();
-      show_helptext(_("Zen Notes"), message);
-      free(message);
-      dialog_clear();
-    }
-  }
-}
 
 static void get_prompt_str(struct gstr *r, struct property *prop)
 {
@@ -922,7 +902,11 @@ int main(int ac, char **av)
 		return 1;
 	}
 
-	process_zen_notes();
+	dialog_clear();
+	char *message = read_readme("README.zen");
+	show_helptext(_("Zen Notes"), message);
+	free(message);
+	dialog_clear();
 
 	set_config_filename(conf_get_configname());
 	do {
