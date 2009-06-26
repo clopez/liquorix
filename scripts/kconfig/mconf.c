@@ -18,6 +18,8 @@
 #include <unistd.h>
 #include <locale.h>
 
+#include <sys/stat.h>
+
 #define LKC_DIRECT_LINK
 #include "lkc.h"
 #include "lxdialog/dialog.h"
@@ -268,14 +270,6 @@ search_help[] = N_(
 	"Examples: USB	=> find all CONFIG_ symbols containing USB\n"
 	"          ^USB => find all CONFIG_ symbols starting with USB\n"
 	"          USB$ => find all CONFIG_ symbols ending with USB\n"
-	"\n"),
-zen_notes[] = N_(
-	"WARNING\n"
-	"-------\n"
-	"* VR and FIFO IO schedulers are broken, they will be fixed\n"
-	"  as soon as possible.\n"
-	"* Toshiba ACPI laptop driver is broken from RFKILL update, it\n"
-	"  will be fixed after the IO schedulers are working.\n"
 	"\n");
 
 static int indent;
@@ -293,6 +287,99 @@ static void show_textbox(const char *title, const char *text, int r, int c);
 static void show_helptext(const char *title, const char *text);
 static void show_help(struct menu *menu);
 
+static void process_zen_notes(void) {
+  const char* filename = "README.zen";
+  struct stat statbuf;
+  int i = stat(filename, &statbuf);
+  if ( i == 0 ) {
+    char *message = calloc(statbuf.st_size+1, sizeof(char));
+    if (message) {
+      FILE* file = fopen(filename, "r");
+      size_t nread = 0;
+      while (!feof(file) && !ferror(file)) {
+	nread = fread(message+nread, sizeof(char), statbuf.st_size-nread, file);
+      }
+      dialog_clear();
+      show_helptext(_("Zen Notes"), message);
+      free(message);
+      dialog_clear();
+    }
+  }
+}
+
+static void get_prompt_str(struct gstr *r, struct property *prop)
+{
+	int i, j;
+	struct menu *submenu[8], *menu;
+
+	str_printf(r, _("Prompt: %s\n"), _(prop->text));
+	str_printf(r, _("  Defined at %s:%d\n"), prop->menu->file->name,
+		prop->menu->lineno);
+	if (!expr_is_yes(prop->visible.expr)) {
+		str_append(r, _("  Depends on: "));
+		expr_gstr_print(prop->visible.expr, r);
+		str_append(r, "\n");
+	}
+	menu = prop->menu->parent;
+	for (i = 0; menu != &rootmenu && i < 8; menu = menu->parent)
+		submenu[i++] = menu;
+	if (i > 0) {
+		str_printf(r, _("  Location:\n"));
+		for (j = 4; --i >= 0; j += 2) {
+			menu = submenu[i];
+			str_printf(r, "%*c-> %s", j, ' ', _(menu_get_prompt(menu)));
+			if (menu->sym) {
+				str_printf(r, " (%s [=%s])", menu->sym->name ?
+					menu->sym->name : _("<choice>"),
+					sym_get_string_value(menu->sym));
+			}
+			str_append(r, "\n");
+		}
+	}
+}
+
+static void get_symbol_str(struct gstr *r, struct symbol *sym)
+{
+	bool hit;
+	struct property *prop;
+
+	if (sym && sym->name)
+		str_printf(r, "Symbol: %s [=%s]\n", sym->name,
+		                                    sym_get_string_value(sym));
+	for_all_prompts(sym, prop)
+		get_prompt_str(r, prop);
+	hit = false;
+	for_all_properties(sym, prop, P_SELECT) {
+		if (!hit) {
+			str_append(r, "  Selects: ");
+			hit = true;
+		} else
+			str_printf(r, " && ");
+		expr_gstr_print(prop->expr, r);
+	}
+	if (hit)
+		str_append(r, "\n");
+	if (sym->rev_dep.expr) {
+		str_append(r, _("  Selected by: "));
+		expr_gstr_print(sym->rev_dep.expr, r);
+		str_append(r, "\n");
+	}
+	str_append(r, "\n\n");
+}
+
+static struct gstr get_relations_str(struct symbol **sym_arr)
+{
+	struct symbol *sym;
+	struct gstr res = str_new();
+	int i;
+
+	for (i = 0; sym_arr && (sym = sym_arr[i]); i++)
+		get_symbol_str(&res, sym);
+	if (!i)
+		str_append(&res, _("No matches found.\n"));
+	return res;
+}
+
 static char filename[PATH_MAX+1];
 static void set_config_filename(const char *config_filename)
 {
@@ -303,8 +390,9 @@ static void set_config_filename(const char *config_filename)
 	sym = sym_lookup("KERNELVERSION", 0);
 	sym_calc_value(sym);
 	size = snprintf(menu_backtitle, sizeof(menu_backtitle),
-	                _("%s - Linux Kernel v%s Configuration"),
-		        config_filename, sym_get_string_value(sym));
+	                _("%s - Linux Kernel v%s \"%s\" Configuration"),
+		        config_filename, sym_get_string_value(sym), getenv("NAME"));
+
 	if (size >= sizeof(menu_backtitle))
 		menu_backtitle[sizeof(menu_backtitle)-1] = '\0';
 	set_dialog_backtitle(menu_backtitle);
@@ -836,9 +924,7 @@ int main(int ac, char **av)
 
 	set_config_filename(conf_get_configname());
 
-	dialog_clear();
-	show_helptext(_("Zen Notes"), zen_notes);
-	dialog_clear();
+	process_zen_notes();
 
 	do {
 		conf(&rootmenu);
