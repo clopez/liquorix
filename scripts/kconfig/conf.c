@@ -578,15 +578,15 @@ int main(int ac, char **av)
 			}
 		}
 		valid_stdin = isatty(0) && isatty(1) && isatty(2);
+	} else {
+		clear_screen();
+		char *message = read_readme("README.zen");
+		printf(message);
+		free(message);
+		printf("\nPress any key to continue!");
+		proceed = get_character();
+		printf("\n\n");
 	}
-
-	clear_screen();
-	char *message = read_readme("README.zen");
-	printf(message);
-	free(message);
-	printf("\nPress any key to continue!");
-	proceed = get_character();
-	printf("\n\n");
 
 	switch (input_mode) {
 	case allnoconfig:
