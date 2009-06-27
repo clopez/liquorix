@@ -571,7 +571,7 @@ int main(int ac, char **av)
 	printf(message);
 	free(message);
 	printf("\nPress any key to continue!");
-	proceed = getch();
+	proceed = getchar();
 	printf("\n\n");
 
 	switch (input_mode) {
