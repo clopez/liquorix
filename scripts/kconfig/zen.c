@@ -27,7 +27,7 @@ inline void clear_screen(void) {
   printf("\033[H\033[J");
 }
 
-int getchar(void) {
+int get_character(void) {
   char ch;
   int fd = fileno(stdin);
   struct termio old_tty, new_tty;
