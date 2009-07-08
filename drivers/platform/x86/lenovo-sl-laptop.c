@@ -37,7 +37,6 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/backlight.h>
 #include <linux/platform_device.h>
-#include <linux/delay.h>
 
 #include <linux/input.h>
 #include <linux/kthread.h>
@@ -1210,7 +1209,6 @@ static int lenovo_sl_procfs_init(void)
 		   "Failed to create proc dir acpi/%s/\n", LENSL_PROC_DIRNAME);
 		return -ENOENT;
 	}
-	proc_dir->owner = THIS_MODULE;
 	proc_ec = create_proc_entry(LENSL_PROC_EC, 0600, proc_dir);
 	if (!proc_ec) {
 		vdbg_printk(LENSL_ERR,
