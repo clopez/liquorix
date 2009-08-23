@@ -37,6 +37,7 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/backlight.h>
 #include <linux/platform_device.h>
+#include <linux/delay.h>
 
 #include <linux/input.h>
 #include <linux/kthread.h>
