@@ -245,6 +245,15 @@ config X86_E_POWERSAVER
 
 	  If in doubt, say N.
 
+config X86_CPUFREQ_EEEPC900
+	tristate "Eeepc 900 ACPI frequency scaling driver"
+	select CPU_FREQ_TABLE
+	depends on ACPI && X86_32 && EXPERIMENTAL
+	help
+	  This adds the CPUFreq driver for the eeepc 900.
+
+	  If in doubt, say N.
+
 comment "shared options"
 
 config X86_SPEEDSTEP_LIB
