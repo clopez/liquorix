@@ -1091,6 +1091,7 @@ config SENSORS_ULTRA45
 config SENSORS_HDAPS
 	tristate "IBM Hard Drive Active Protection System (hdaps)"
 	depends on INPUT && X86
+	select THINKPAD_EC
 	select INPUT_POLLDEV
 	default n
 	help
