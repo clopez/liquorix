@@ -334,6 +334,15 @@ choice
 	prompt "RCU Implementation"
 	default TREE_RCU
 
+config CLASSIC_RCU
+	bool "Classic RCU"
+	help
+	  This option selects the classic RCU implementation that is
+	  designed for best read-side performance on non-realtime
+	  systems.
+
+	  Select this option if you are unsure.
+
 config TREE_RCU
 	bool "Tree-based hierarchical RCU"
 	help
@@ -360,6 +369,17 @@ config TINY_RCU
 	  designed for UP systems from which real-time response
 	  is not required.  This option greatly reduces the
 	  memory footprint of RCU.
+
+config PREEMPT_RCU
+	bool "Preemptible RCU"
+	depends on PREEMPT
+	help
+	  This option reduces the latency of the kernel by making certain
+	  RCU sections preemptible. Normally RCU code is non-preemptible, if
+	  this option is selected then read-only RCU sections become
+	  preemptible. This helps latency, but may expose bugs due to
+	  now-naive assumptions about each RCU read-side critical section
+	  remaining on a given CPU through its execution.
 
 endchoice
 
@@ -427,6 +447,13 @@ config TREE_RCU_TRACE
 	  This option provides tracing for the TREE_RCU and
 	  TREE_PREEMPT_RCU implementations, permitting Makefile to
 	  trivially select kernel/rcutree_trace.c.
+
+config PREEMPT_RCU_TRACE
+	def_bool RCU_TRACE && PREEMPT_RCU
+	select DEBUG_FS
+	help
+	  This option provides tracing for the PREEMPT_RCU implementation,
+	  permitting Makefile to trivially select kernel/rcupreempt_trace.c.
 
 endmenu # "RCU Subsystem"
 
