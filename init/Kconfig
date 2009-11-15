@@ -371,7 +371,7 @@ config TINY_RCU
 	  memory footprint of RCU.
 
 config PREEMPT_RCU
-	bool "Preemptible RCU"
+	bool "Preemptible RCU (BROKEN, DO NOT USE!)"
 	depends on PREEMPT
 	help
 	  This option reduces the latency of the kernel by making certain
@@ -380,6 +380,7 @@ config PREEMPT_RCU
 	  preemptible. This helps latency, but may expose bugs due to
 	  now-naive assumptions about each RCU read-side critical section
 	  remaining on a given CPU through its execution.
+	  THIS IS CURRENTLY BROKEN IN ZEN, PLEASE DO NOT USE!
 
 endchoice
 
