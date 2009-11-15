@@ -174,7 +174,7 @@ static inline void rcu_nmi_exit(void)
 }
 
 #else
-#if defined(CONFIG_NO_HZ) && !defined(CLASSIC_RCU)
+#if defined(CONFIG_NO_HZ) && !defined(CONFIG_CLASSIC_RCU)
 extern void rcu_irq_enter(void);
 extern void rcu_irq_exit(void);
 extern void rcu_nmi_enter(void);
