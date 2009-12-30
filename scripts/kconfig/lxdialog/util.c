@@ -167,7 +167,7 @@ static void set_zen_theme(void)
 	DLG_COLOR(menubox,          COLOR_CYAN, COLOR_BLACK, false);
 	DLG_COLOR(menubox_border,   COLOR_BLACK,  COLOR_BLACK, true);
 
-	DLG_COLOR(item,             COLOR_WHITE, COLOR_BLACK, true);
+	DLG_COLOR(item,             COLOR_WHITE, COLOR_BLACK, false);
 	DLG_COLOR(item_selected,    COLOR_WHITE, COLOR_BLUE,   true);
 
 	DLG_COLOR(tag,              COLOR_CYAN,    COLOR_BLACK, false);
