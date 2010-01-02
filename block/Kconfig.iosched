@@ -38,11 +38,11 @@ config IOSCHED_SIO
 	tristate "Simple I/O scheduler"
 	default y
 	---help---
-	  The Simple I/O scheduler is an extremely simple scheduler that
-	  does basic merging and no sorting. It is aimed for usage in
-	  aleatory access devices like SSD, USB flash devices, etc.
-	  It differences synchronous requests from asynchronous ones for
-	  better interactibility.
+	  The Simple I/O scheduler is an extremely simple scheduler,
+	  based on noop and deadline, that relies on deadlines to
+	  ensure fairness. The algorithm does not do any sorting but
+	  basic merging, trying to keep a minimum overhead. It is aimed
+	  mainly for aleatory access devices (eg: flash devices).
 
 config CFQ_GROUP_IOSCHED
 	bool "CFQ Group Scheduling support"
