@@ -116,6 +116,8 @@ struct rcu_data {
  */
 extern void rcu_sched_qs(int cpu);
 extern void rcu_bh_qs(int cpu);
+extern void synchronize_rcu(void);
+extern void rcu_scheduler_starting(void);
 
 extern int rcu_pending(int cpu);
 extern int rcu_needs_cpu(int cpu);
@@ -157,12 +159,19 @@ extern struct lockdep_map rcu_lock_map;
 		local_bh_enable(); \
 	} while (0)
 
-#define __synchronize_sched() synchronize_rcu()
+#define synchronize_rcu synchronize_sched
 
 #define call_rcu_sched(head, func) call_rcu(head, func)
 
-extern void __rcu_init(void);
 #define rcu_init_sched()	do { } while (0)
+
+extern void synchronize_rcu_expedited(void);
+
+static inline void synchronize_rcu_bh_expedited(void)
+{
+        synchronize_sched_expedited();
+}
+
 extern void rcu_check_callbacks(int cpu, int user);
 extern void rcu_restart_cpu(int cpu);
 
