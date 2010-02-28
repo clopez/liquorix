@@ -1212,13 +1212,8 @@ struct task_struct {
 	unsigned int policy;
 	cpumask_t cpus_allowed;
 
-#if defined(CONFIG_TREE_PREEMPT_RCU) || defined(CONFIG_PREEMPT_RCU)
-	int rcu_read_lock_nesting;
-#endif
-#ifdef CONFIG_PREEMPT_RCU
-	int rcu_flipctr_idx;
-#endif
 #ifdef CONFIG_TREE_PREEMPT_RCU
+	int rcu_read_lock_nesting;
 	char rcu_read_unlock_special;
 	struct rcu_node *rcu_blocked_node;
 	struct list_head rcu_node_entry;
