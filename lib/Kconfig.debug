@@ -916,7 +916,7 @@ config FAULT_INJECTION
 config FAILSLAB
 	bool "Fault-injection capability for kmalloc"
 	depends on FAULT_INJECTION
-	depends on SLAB || SLUB
+	depends on SLAB || SLUB || SLQB
 	help
 	  Provide fault-injection capability for kmalloc.
 

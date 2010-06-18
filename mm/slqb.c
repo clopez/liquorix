@@ -860,6 +860,9 @@ static int __init setup_slqb_debug(char *str)
 		case 't':
 			slqb_debug |= SLAB_TRACE;
 			break;
+		case 'a':
+			slqb_debug |= SLAB_FAILSLAB;
+			break;
 		default:
 			printk(KERN_ERR "slqb_debug option '%c' "
 				"unknown. skipped\n", *str);
@@ -1561,7 +1564,7 @@ static __always_inline void *slab_alloc(struct kmem_cache *s,
 	lockdep_trace_alloc(gfpflags);
 	might_sleep_if(gfpflags & __GFP_WAIT);
 
-	if (should_failslab(s->objsize, gfpflags))
+	if (should_failslab(s->objsize, gfpflags, s->flags))
 		return NULL;
 
 again:
@@ -3477,6 +3480,23 @@ static ssize_t total_objects_show(struct kmem_cache *s, char *buf)
 }
 SLAB_ATTR_RO(total_objects);
 
+#ifdef CONFIG_FAILSLAB
+static ssize_t failslab_show(struct kmem_cache *s, char *buf)
+{
+	return sprintf(buf, "%d\n", !!(s->flags & SLAB_FAILSLAB));
+}
+
+static ssize_t failslab_store(struct kmem_cache *s, const char *buf,
+							size_t length)
+{
+	s->flags &= ~SLAB_FAILSLAB;
+	if (buf[0] == '1')
+		s->flags |= SLAB_FAILSLAB;
+	return length;
+}
+SLAB_ATTR(failslab);
+#endif
+
 static ssize_t reclaim_account_show(struct kmem_cache *s, char *buf)
 {
 	return sprintf(buf, "%d\n", !!(s->flags & SLAB_RECLAIM_ACCOUNT));
@@ -3654,6 +3674,10 @@ static struct attribute *slab_attrs[] = {
 	&claim_remote_list_attr.attr,
 	&claim_remote_list_objects_attr.attr,
 #endif
+#ifdef CONFIG_FAILSLAB
+	&failslab_attr.attr,
+#endif
+
 	NULL
 };
 
