@@ -109,7 +109,7 @@ config LIRC_TTUSBIR
 
 config LIRC_ZILOG
 	tristate "Zilog/Hauppauge IR Transmitter"
-	depends on INPUT_LIRC
+	depends on INPUT_LIRC && I2C
 	help
 	  Driver for the Zilog/Hauppauge IR Transmitter, found on
 	  PVR-150/500, HVR-1200/1250/1700/1800, HD-PVR and other cards
