@@ -365,7 +365,6 @@ static struct lirc_driver driver = {
 };
 
 
-#ifdef MODULE
 static int init_chrdev(void)
 {
 	driver.minor = lirc_register_driver(&driver);
@@ -382,7 +381,6 @@ static void drop_chrdev(void)
 {
 	lirc_unregister_driver(driver.minor);
 }
-#endif
 
 
 /* SECTION: Hardware */
