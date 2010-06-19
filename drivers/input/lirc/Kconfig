@@ -27,7 +27,7 @@ config LIRC_ENE0100
 
 config LIRC_I2C
 	tristate "I2C Based IR Receivers"
-	depends on INPUT_LIRC
+	depends on INPUT_LIRC && I2C
 	help
 	  Driver for I2C-based IR receivers, such as those commonly
 	  found onboard Hauppauge PVR-150/250/350 video capture cards

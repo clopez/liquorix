@@ -148,10 +148,12 @@ static void drop_port(void);
 static int lirc_open(struct inode *inode, struct file *file)
 {
 	spin_lock(&dev_lock);
+#ifdef CONFIG_MODULE_UNLOAD
 	if (module_refcount(THIS_MODULE)) {
 		spin_unlock(&dev_lock);
 		return -EBUSY;
 	}
+#endif
 	spin_unlock(&dev_lock);
 	return 0;
 }

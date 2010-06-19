@@ -242,8 +242,10 @@ static void irq_handler(void *blah)
 	unsigned int level, newlevel;
 	unsigned int timeout;
 
+#ifdef CONFIG_MODULE_UNLOAD
 	if (!module_refcount(THIS_MODULE))
 		return;
+#endif
 
 	if (!is_claimed)
 		return;
@@ -519,8 +521,10 @@ static int lirc_ioctl(struct inode *node, struct file *filep, unsigned int cmd,
 
 static int lirc_open(struct inode *node, struct file *filep)
 {
+#ifdef CONFIG_MODULE_UNLOAD
 	if (module_refcount(THIS_MODULE) || !lirc_claim())
 		return -EBUSY;
+#endif
 
 	parport_enable_irq(pport);
 
