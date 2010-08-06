@@ -1555,6 +1555,7 @@ static void get_scan_count(struct zone *zone, struct scan_control *sc,
 	u64 fraction[2], denominator;
 	enum lru_list l;
 	int noswap = 0;
+	int tmp_priority;
 
 	/* If we have no swap space, do not bother scanning anon pages. */
 	if (!sc->may_swap || (nr_swap_pages <= 0)) {
@@ -1635,7 +1636,11 @@ out:
 
 		scan = zone_nr_lru_pages(zone, sc, l);
 		if (priority || noswap) {
-			scan >>= priority;
+			tmp_priority = priority;
+
+			if (file && priority > 0)
+				tmp_priority = DEF_PRIORITY;
+			scan >>= tmp_priority;
 			scan = div64_u64(scan * fraction[file], denominator);
 		}
 		nr[l] = nr_scan_try_batch(scan,
