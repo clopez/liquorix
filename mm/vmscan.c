@@ -1243,7 +1243,7 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 		nr_freed = shrink_page_list(&page_list, sc, PAGEOUT_IO_ASYNC);
 
 		/* Check if we should synchronously wait for writeback */
-		if (should_reclaim_stall(nr_taken, nr_reclaimed, priority, sc)) {
+		if (should_reclaim_stall(nr_taken, nr_freed, priority, sc)) {
 			/*
 			 * The attempt at page out may have made some
 			 * of the pages active, mark them inactive again.
