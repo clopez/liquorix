@@ -6101,6 +6101,8 @@ static u16 ixgbe_select_queue(struct net_device *dev, struct sk_buff *skb)
 	struct ixgbe_adapter *adapter = netdev_priv(dev);
 	int txq = smp_processor_id();
 
+#ifdef CONFIG_IXGBE_DCB
+#endif
 	if (adapter->flags & IXGBE_FLAG_FDIR_HASH_CAPABLE) {
 		while (unlikely(txq >= dev->real_num_tx_queues))
 			txq -= dev->real_num_tx_queues;
@@ -6165,10 +6167,12 @@ static netdev_tx_t ixgbe_xmit_frame(struct sk_buff *skb,
 		 * was specified by the switch */
 		if ((skb->protocol == htons(ETH_P_FCOE)) ||
 		    (skb->protocol == htons(ETH_P_FIP))) {
+#ifdef CONFIG_IXGBE_DCB
+		if (adapter->flags & IXGBE_FLAG_DCB_ENABLED) {
 			tx_flags &= ~(IXGBE_TX_FLAGS_VLAN_PRIO_MASK
 				      << IXGBE_TX_FLAGS_VLAN_SHIFT);
 			tx_flags |= ((adapter->fcoe.up << 13)
-				     << IXGBE_TX_FLAGS_VLAN_SHIFT);
+				      << IXGBE_TX_FLAGS_VLAN_SHIFT);
 		}
 #endif
 		/* flag for FCoE offloads */
