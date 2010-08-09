@@ -1557,6 +1557,11 @@ extern void remove_cpu(unsigned long cpu);
 extern int above_background_load(void);
 #else /* CFS */
 extern int runqueue_is_locked(int cpu);
+
+/* CFS Boost */
+extern void sched_privileged_task(struct task_struct *p);
+extern int sysctl_sched_privileged_nice_level;
+
 #define tsk_seruntime(t)	((t)->se.sum_exec_runtime)
 #define tsk_rttimeout(t)	((t)->rt.timeout)
 
@@ -1566,7 +1571,12 @@ static inline void sched_exit(struct task_struct *p)
 
 static inline void set_oom_timeslice(struct task_struct *p)
 {
+#ifdef CONFIG_SCHED_CFS_BOOST
+	if (p->policy == SCHED_NORMAL || p->policy == SCHED_BATCH)
+		sched_privileged_task(p);
+#else
 	p->rt.time_slice = HZ;
+#endif
 }
 
 static inline void tsk_cpus_current(struct task_struct *p)
