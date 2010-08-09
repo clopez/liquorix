@@ -63,7 +63,6 @@
  */
 #define REV_RT2860C			0x0100
 #define REV_RT2860D			0x0101
-#define REV_RT2870D			0x0101
 #define REV_RT2872E			0x0200
 #define REV_RT3070E			0x0200
 #define REV_RT3070F			0x0201
@@ -75,7 +74,7 @@
  * Signal information.
  * Default offset is required for RSSI <-> dBm conversion.
  */
-#define DEFAULT_RSSI_OFFSET		120 /* FIXME */
+#define DEFAULT_RSSI_OFFSET		120
 
 /*
  * Register layout information.
@@ -97,6 +96,21 @@
 /*
  * Registers.
  */
+
+/*
+ * E2PROM_CSR: PCI EEPROM control register.
+ * RELOAD: Write 1 to reload eeprom content.
+ * TYPE: 0: 93c46, 1:93c66.
+ * LOAD_STATUS: 1:loading, 0:done.
+ */
+#define E2PROM_CSR			0x0004
+#define E2PROM_CSR_DATA_CLOCK		FIELD32(0x00000001)
+#define E2PROM_CSR_CHIP_SELECT		FIELD32(0x00000002)
+#define E2PROM_CSR_DATA_IN		FIELD32(0x00000004)
+#define E2PROM_CSR_DATA_OUT		FIELD32(0x00000008)
+#define E2PROM_CSR_TYPE			FIELD32(0x00000030)
+#define E2PROM_CSR_LOAD_STATUS		FIELD32(0x00000040)
+#define E2PROM_CSR_RELOAD		FIELD32(0x00000080)
 
 /*
  * OPT_14: Unknown register used by rt3xxx devices.
@@ -320,6 +334,39 @@
 #define RX_MAX_CNT			0x0294
 #define RX_CRX_IDX			0x0298
 #define RX_DRX_IDX			0x029c
+
+/*
+ * USB_DMA_CFG
+ * RX_BULK_AGG_TIMEOUT: Rx Bulk Aggregation TimeOut in unit of 33ns.
+ * RX_BULK_AGG_LIMIT: Rx Bulk Aggregation Limit in unit of 256 bytes.
+ * PHY_CLEAR: phy watch dog enable.
+ * TX_CLEAR: Clear USB DMA TX path.
+ * TXOP_HALT: Halt TXOP count down when TX buffer is full.
+ * RX_BULK_AGG_EN: Enable Rx Bulk Aggregation.
+ * RX_BULK_EN: Enable USB DMA Rx.
+ * TX_BULK_EN: Enable USB DMA Tx.
+ * EP_OUT_VALID: OUT endpoint data valid.
+ * RX_BUSY: USB DMA RX FSM busy.
+ * TX_BUSY: USB DMA TX FSM busy.
+ */
+#define USB_DMA_CFG			0x02a0
+#define USB_DMA_CFG_RX_BULK_AGG_TIMEOUT	FIELD32(0x000000ff)
+#define USB_DMA_CFG_RX_BULK_AGG_LIMIT	FIELD32(0x0000ff00)
+#define USB_DMA_CFG_PHY_CLEAR		FIELD32(0x00010000)
+#define USB_DMA_CFG_TX_CLEAR		FIELD32(0x00080000)
+#define USB_DMA_CFG_TXOP_HALT		FIELD32(0x00100000)
+#define USB_DMA_CFG_RX_BULK_AGG_EN	FIELD32(0x00200000)
+#define USB_DMA_CFG_RX_BULK_EN		FIELD32(0x00400000)
+#define USB_DMA_CFG_TX_BULK_EN		FIELD32(0x00800000)
+#define USB_DMA_CFG_EP_OUT_VALID	FIELD32(0x3f000000)
+#define USB_DMA_CFG_RX_BUSY		FIELD32(0x40000000)
+#define USB_DMA_CFG_TX_BUSY		FIELD32(0x80000000)
+
+/*
+ * US_CYC_CNT
+ */
+#define US_CYC_CNT			0x02a4
+#define US_CYC_CNT_CLOCK_CYCLE		FIELD32(0x000000ff)
 
 /*
  * PBF_SYS_CTRL
@@ -672,14 +719,20 @@
 #define TBTT_TIMER			0x1124
 
 /*
- * INT_TIMER_CFG:
+ * INT_TIMER_CFG: timer configuration
+ * PRE_TBTT_TIMER: leadtime to tbtt for pretbtt interrupt in units of 1/16 TU
+ * GP_TIMER: period of general purpose timer in units of 1/16 TU
  */
 #define INT_TIMER_CFG			0x1128
+#define INT_TIMER_CFG_PRE_TBTT_TIMER	FIELD32(0x0000ffff)
+#define INT_TIMER_CFG_GP_TIMER		FIELD32(0xffff0000)
 
 /*
  * INT_TIMER_EN: GP-timer and pre-tbtt Int enable
  */
 #define INT_TIMER_EN			0x112c
+#define INT_TIMER_EN_PRE_TBTT_TIMER	FIELD32(0x00000001)
+#define INT_TIMER_EN_GP_TIMER		FIELD32(0x00000002)
 
 /*
  * CH_IDLE_STA: channel idle time
@@ -754,6 +807,18 @@
  * EDCA_TID_AC_MAP:
  */
 #define EDCA_TID_AC_MAP			0x1310
+
+/*
+ * TX_PWR_CFG:
+ */
+#define TX_PWR_CFG_RATE0		FIELD32(0x0000000f)
+#define TX_PWR_CFG_RATE1		FIELD32(0x000000f0)
+#define TX_PWR_CFG_RATE2		FIELD32(0x00000f00)
+#define TX_PWR_CFG_RATE3		FIELD32(0x0000f000)
+#define TX_PWR_CFG_RATE4		FIELD32(0x000f0000)
+#define TX_PWR_CFG_RATE5		FIELD32(0x00f00000)
+#define TX_PWR_CFG_RATE6		FIELD32(0x0f000000)
+#define TX_PWR_CFG_RATE7		FIELD32(0xf0000000)
 
 /*
  * TX_PWR_CFG_0:
@@ -1253,7 +1318,25 @@
 #define TX_STA_CNT2_TX_UNDER_FLOW_COUNT	FIELD32(0xffff0000)
 
 /*
- * TX_STA_FIFO: TX Result for specific PID status fifo register
+ * TX_STA_FIFO: TX Result for specific PID status fifo register.
+ *
+ * This register is implemented as FIFO with 16 entries in the HW. Each
+ * register read fetches the next tx result. If the FIFO is full because
+ * it wasn't read fast enough after the according interrupt (TX_FIFO_STATUS)
+ * triggered, the hw seems to simply drop further tx results.
+ *
+ * VALID: 1: this tx result is valid
+ *        0: no valid tx result -> driver should stop reading
+ * PID_TYPE: The PID latched from the PID field in the TXWI, can be used
+ *           to match a frame with its tx result (even though the PID is
+ *           only 4 bits wide).
+ * TX_SUCCESS: Indicates tx success (1) or failure (0)
+ * TX_AGGRE: Indicates if the frame was part of an aggregate (1) or not (0)
+ * TX_ACK_REQUIRED: Indicates if the frame needed to get ack'ed (1) or not (0)
+ * WCID: The wireless client ID.
+ * MCS: The tx rate used during the last transmission of this frame, be it
+ *      successful or not.
+ * PHYMODE: The phymode used for the transmission.
  */
 #define TX_STA_FIFO			0x1718
 #define TX_STA_FIFO_VALID		FIELD32(0x00000001)
@@ -1370,17 +1453,17 @@
 struct mac_wcid_entry {
 	u8 mac[6];
 	u8 reserved[2];
-} __attribute__ ((packed));
+} __packed;
 
 struct hw_key_entry {
 	u8 key[16];
 	u8 tx_mic[8];
 	u8 rx_mic[8];
-} __attribute__ ((packed));
+} __packed;
 
 struct mac_iveiv_entry {
 	u8 iv[8];
-} __attribute__ ((packed));
+} __packed;
 
 /*
  * MAC_WCID_ATTRIBUTE:
@@ -1389,6 +1472,10 @@ struct mac_iveiv_entry {
 #define MAC_WCID_ATTRIBUTE_CIPHER	FIELD32(0x0000000e)
 #define MAC_WCID_ATTRIBUTE_BSS_IDX	FIELD32(0x00000070)
 #define MAC_WCID_ATTRIBUTE_RX_WIUDF	FIELD32(0x00000380)
+#define MAC_WCID_ATTRIBUTE_CIPHER_EXT	FIELD32(0x00000400)
+#define MAC_WCID_ATTRIBUTE_BSS_IDX_EXT	FIELD32(0x00000800)
+#define MAC_WCID_ATTRIBUTE_WAPI_MCBC	FIELD32(0x00008000)
+#define MAC_WCID_ATTRIBUTE_WAPI_KEY_IDX	FIELD32(0xff000000)
 
 /*
  * SHARED_KEY_MODE:
@@ -1510,7 +1597,9 @@ struct mac_iveiv_entry {
  */
 
 /*
- * BBP 1: TX Antenna
+ * BBP 1: TX Antenna & Power
+ * POWER: 0 - normal, 1 - drop tx power by 6dBm, 2 - drop tx power by 12dBm,
+ *	3 - increase tx power by 6dBm
  */
 #define BBP1_TX_POWER			FIELD8(0x07)
 #define BBP1_TX_ANTENNA			FIELD8(0x18)
@@ -1800,9 +1889,15 @@ struct mac_iveiv_entry {
 #define EEPROM_TXPOWER_A_2		FIELD16(0xff00)
 
 /*
- * EEPROM TXpower byrate: 20MHZ power
+ * EEPROM TXPOWER by rate: tx power per tx rate for HT20 mode
  */
 #define EEPROM_TXPOWER_BYRATE		0x006f
+#define EEPROM_TXPOWER_BYRATE_SIZE	9
+
+#define EEPROM_TXPOWER_BYRATE_RATE0	FIELD16(0x000f)
+#define EEPROM_TXPOWER_BYRATE_RATE1	FIELD16(0x00f0)
+#define EEPROM_TXPOWER_BYRATE_RATE2	FIELD16(0x0f00)
+#define EEPROM_TXPOWER_BYRATE_RATE3	FIELD16(0xf000)
 
 /*
  * EEPROM BBP.
@@ -1868,6 +1963,13 @@ struct mac_iveiv_entry {
 
 /*
  * Word1
+ * ACK: 0: No Ack needed, 1: Ack needed
+ * NSEQ: 0: Don't assign hw sequence number, 1: Assign hw sequence number
+ * BW_WIN_SIZE: BA windows size of the recipient
+ * WIRELESS_CLI_ID: Client ID for WCID table access
+ * MPDU_TOTAL_BYTE_COUNT: Length of 802.11 frame
+ * PACKETID: Will be latched into the TX_STA_FIFO register once the according
+ *           frame was processed. 0: Don't report tx status for this frame.
  */
 #define TXWI_W1_ACK			FIELD32(0x00000001)
 #define TXWI_W1_NSEQ			FIELD32(0x00000002)
