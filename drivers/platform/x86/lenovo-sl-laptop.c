@@ -556,6 +556,7 @@ static void backlight_exit(void)
 static int backlight_init(void)
 {
 	int status = 0;
+	struct backlight_properties props;
 
 	lcdd_handle = NULL;
 	backlight = NULL;
@@ -573,8 +574,9 @@ static int backlight_init(void)
 	if (status || !backlight_levels.count)
 		goto err;
 
+	memset(&props, 0, sizeof(struct backlight_properties));
 	backlight = backlight_device_register(LENSL_BACKLIGHT_NAME,
-			NULL, NULL, &lensl_backlight_ops);
+		NULL, NULL, &lensl_backlight_ops, &props);
 	backlight->props.max_brightness = backlight_levels.count - 1;
 	backlight->props.brightness = lensl_bd_get_brightness(backlight);
 	vdbg_printk(LENSL_INFO, "Started backlight brightness control\n");
