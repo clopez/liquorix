@@ -114,9 +114,7 @@ void save_processor_state(void)
 {
 	__save_processor_state(&saved_context);
 }
-#ifdef CONFIG_X86_32
 EXPORT_SYMBOL(save_processor_state);
-#endif
 
 static void do_fpu_end(void)
 {
