@@ -25,6 +25,14 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
+/* This file has been patched with Linux PHC: www.linux-phc.org
+ * Patch version: linux-phc-0.3.199
+ * Note that this is no "official" release by the intel-phc author, it's just
+ * a quick hack by myself (Fabian Henze, flyser42 AT gmx DOT de)
+ *
+ * Dedicated to Fabrice Bellamy - Author of the very first PHC patches
+ */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -62,12 +70,23 @@ enum {
 };
 
 #define INTEL_MSR_RANGE		(0xffff)
+#define INTEL_MSR_VID_MASK	(0x00ff)	//VID
+#define INTEL_MSR_FID_MASK	(0x1f00)	//Bit 12:8=FID
+#define INTEL_MSR_SLFM_MASK	(0x8000)	//Bit 15=SLFM / DFFS (Dynamic FSB Frequency Switching)
+#define INTEL_MSR_NIF_MASK	(0x4000)	//Bit 14=Non integer FIDS ("half FIDs")
+
+#define INTEL_FULL_MASK		(INTEL_MSR_SLFM_MASK | INTEL_MSR_NIF_MASK | INTEL_MSR_FID_MASK | INTEL_MSR_VID_MASK)	//combine all masks
+//#define MSR_IA32_ABS		(0x000000ce)	//Absolute Minimum (SLFM) and Absolute Maximum (IDA) Values stored here. Not yet in msr-index.h.
+#define INTEL_MSR_FSB_MASK	(0x07)		//First three Bits are intex of a FSB
+#define INTEL_MSR_FID_SHIFT	(0x8)		//Shift 2nd Byte down to the first one to have an integer starting at 0
+#define PHC_VERSION_STRING	"0.3.199-2"
 
 struct acpi_cpufreq_data {
 	struct acpi_processor_performance *acpi_data;
 	struct cpufreq_frequency_table *freq_table;
 	unsigned int resume;
 	unsigned int cpu_feature;
+	acpi_integer *original_controls;
 };
 
 static DEFINE_PER_CPU(struct acpi_cpufreq_data *, acfreq_data);
@@ -78,6 +97,8 @@ static struct acpi_processor_performance *acpi_perf_data;
 static struct cpufreq_driver acpi_cpufreq_driver;
 
 static unsigned int acpi_pstate_strict;
+static unsigned int phc_unlock;
+static unsigned int phc_forceida;
 
 static int check_est_cpu(unsigned int cpuid)
 {
@@ -103,13 +124,14 @@ static unsigned extract_io(u32 value, struct acpi_cpufreq_data *data)
 static unsigned extract_msr(u32 msr, struct acpi_cpufreq_data *data)
 {
 	int i;
+	u32 fid;
 	struct acpi_processor_performance *perf;
 
-	msr &= INTEL_MSR_RANGE;
+	fid = msr & INTEL_MSR_FID_MASK;
 	perf = data->acpi_data;
 
 	for (i = 0; data->freq_table[i].frequency != CPUFREQ_TABLE_END; i++) {
-		if (msr == perf->states[data->freq_table[i].index].status)
+		if (fid == (perf->states[data->freq_table[i].index].status & INTEL_MSR_FID_MASK))
 			return data->freq_table[i].frequency;
 	}
 	return data->freq_table[0].frequency;
@@ -295,7 +317,6 @@ static int acpi_cpufreq_target(struct cpufreq_policy *policy,
 	int result = 0;
 
 	dprintk("acpi_cpufreq_target %d (%d)\n", target_freq, policy->cpu);
-
 	if (unlikely(data == NULL ||
 	     data->acpi_data == NULL || data->freq_table == NULL)) {
 		return -ENODEV;
@@ -680,6 +701,11 @@ static int acpi_cpufreq_cpu_init(struct cpufreq_policy *policy)
 	 */
 	data->resume = 1;
 
+	if (phc_forceida == 1) {	//force activating the feature. It does not really activate it but pretend to the system that it is active.
+		printk("PHC: WARNING. By setting the IDA CPU capability bit you override CPUID feature data. This may result in unexpected problems.\n");
+		set_cpu_cap(c, X86_FEATURE_IDA);
+	}
+
 	return result;
 
 err_freqfree:
@@ -704,6 +730,8 @@ static int acpi_cpufreq_cpu_exit(struct cpufreq_policy *policy)
 		per_cpu(acfreq_data, policy->cpu) = NULL;
 		acpi_processor_unregister_performance(data->acpi_data,
 						      policy->cpu);
+		if (data->original_controls)
+			kfree(data->original_controls);
 		kfree(data);
 	}
 
@@ -721,8 +749,584 @@ static int acpi_cpufreq_resume(struct cpufreq_policy *policy)
 	return 0;
 }
 
+/* sysfs interface to change operating points voltages */
+
+static unsigned int extract_fid_from_control(unsigned int control)	//Get Bits for FID
+{
+	return ((control & INTEL_MSR_FID_MASK) >> INTEL_MSR_FID_SHIFT);
+}
+
+static unsigned int extract_slfm_from_control(unsigned int control)	//Get Bit marking the SLFM / DFFS
+{
+	return (((control & INTEL_MSR_SLFM_MASK) >> INTEL_MSR_FID_SHIFT) > 0);	//returns "1" if SLFM Bit is set
+}
+
+static unsigned int extract_nif_from_control(unsigned int control)	//Get Bit marking the Non Integer FIDs
+{
+	return (((control & INTEL_MSR_NIF_MASK) >> INTEL_MSR_FID_SHIFT) > 0); //returns "1" if NIF Bit is set
+}
+
+static unsigned int extract_vid_from_control(unsigned int control)	//Get Bits for VID
+{
+	return (control & INTEL_MSR_VID_MASK);
+}
+
+
+static bool check_cpu_control_capability(struct acpi_cpufreq_data *data) {
+ /* check if the cpu we are running on is capable of setting new control data
+  *
+  */
+	if (unlikely(data == NULL ||
+	             data->acpi_data == NULL ||
+	             data->freq_table == NULL ||
+	             data->cpu_feature != SYSTEM_INTEL_MSR_CAPABLE)) {
+		return false;
+	} else {
+		return true;
+	};
+}
+
+
+static ssize_t check_origial_table (struct acpi_cpufreq_data *data)
+{
+	struct acpi_processor_performance *acpi_data;
+	struct cpufreq_frequency_table *freq_table;
+	unsigned int state_index;
+
+	acpi_data = data->acpi_data;
+	freq_table = data->freq_table;
+
+	if (data->original_controls == NULL) {
+		// Backup original control values
+		data->original_controls = kcalloc(acpi_data->state_count,
+		                                  sizeof(acpi_integer), GFP_KERNEL);
+		if (data->original_controls == NULL) {
+			printk("failed to allocate memory for original control values\n");
+			return -ENOMEM;
+		}
+		for (state_index = 0; state_index < acpi_data->state_count; state_index++) {
+			data->original_controls[state_index] = acpi_data->states[state_index].control;
+		}
+	}
+	return 0;
+}
+
+/*struct absolute_op_values {
+		unsigned int max_fid;
+		unsigned int min_fid;
+		unsigned int max_vid;
+		unsigned int min_vid;
+		unsigned int max_nif;
+		unsigned int min_nif;
+};*/
+
+
+
+/*static unsigned int get_absolute_ops (unsigned int cpu, struct absolute_op_values *ptr) {
+	u32 loabs = 0;
+	u32 hiabs = 0;
+
+	rdmsr_on_cpu(cpu, MSR_IA32_ABS, &loabs, &hiabs);		// read  MSR_IA32_ABS
+	if ((loabs > 0) && (hiabs > 0)) {
+		ptr->min_fid = (loabs & INTEL_MSR_FID_MASK) >> INTEL_MSR_FID_SHIFT;
+		ptr->max_fid = (hiabs & INTEL_MSR_FID_MASK) >> INTEL_MSR_FID_SHIFT;
+		ptr->min_nif = ((loabs & INTEL_MSR_NIF_MASK) >> INTEL_MSR_FID_SHIFT) > 0;
+		ptr->max_nif = ((hiabs & INTEL_MSR_NIF_MASK) >> INTEL_MSR_FID_SHIFT) > 0;
+		ptr->min_vid = (loabs & INTEL_MSR_VID_MASK);
+		ptr->max_vid = (hiabs & INTEL_MSR_VID_MASK);
+	} else {
+		rdmsr_on_cpu(cpu, MSR_IA32_PERF_STATUS, &loabs, &hiabs);		// read  MSR_IA32_ABS
+		if ((loabs > 0) && (hiabs > 0)) {
+			ptr->max_fid = (hiabs & INTEL_MSR_FID_MASK) >> INTEL_MSR_FID_SHIFT;
+			ptr->max_nif = ((hiabs & INTEL_MSR_NIF_MASK) >> INTEL_MSR_FID_SHIFT) > 0;
+			ptr->max_vid = (hiabs & INTEL_MSR_VID_MASK);
+
+			ptr->min_fid = ((hiabs>>16) & INTEL_MSR_FID_MASK) >> INTEL_MSR_FID_SHIFT;
+			ptr->min_nif = (((hiabs>>16)  & INTEL_MSR_NIF_MASK) >> INTEL_MSR_FID_SHIFT) > 0;
+			ptr->min_vid = ((hiabs>>16)  & INTEL_MSR_VID_MASK);
+
+		} else {
+			//ERROR
+		}
+	}
+	printk("HIOP: maxFID is %d, maxNIF is %d maxVID %d\n", ptr->max_fid, ptr->max_nif, ptr->max_vid);
+	printk("LOOP: minFID is %d, minNIF is %d minVID %d\n", ptr->min_fid, ptr->min_nif, ptr->min_vid);
+
+	//should make it more fail-save here and return some more values on errors
+	return 0;
+}*/
+
+struct new_oppoints {
+	unsigned long pstate; 		//PSTATE value
+	unsigned long statefreq;	//frequency fot that PSTATE
+};
+
+
+
+static ssize_t show_freq_attr_controls(struct cpufreq_policy *policy, char *buf) {
+	/* display phc's controls for the cpu (frequency id's and related voltage id's)*/
+	struct acpi_cpufreq_data *data = per_cpu(acfreq_data, policy->cpu);
+	struct acpi_processor_performance *acpi_data;
+	struct cpufreq_frequency_table *freq_table;
+	ssize_t count = 0;
+	unsigned int i;
+
+	if (!check_cpu_control_capability(data)) return -ENODEV; //check if CPU is capable of changing controls
+
+	acpi_data = data->acpi_data;
+	freq_table = data->freq_table;
+
+	for (i = 0; freq_table[i].frequency != CPUFREQ_TABLE_END; i++) {
+		count += sprintf(&buf[count], "%08x", (int)acpi_data->states[freq_table[i].index].control);
+		//add seperating space
+		if(freq_table[i+1].frequency != CPUFREQ_TABLE_END) count += sprintf(&buf[count], " ");
+	}
+	count += sprintf(&buf[count], "\n");	//add line break
+	return count;
+
+}
+
+static ssize_t show_freq_attr_default_controls(struct cpufreq_policy *policy, char *buf) {
+	/* display acpi's default controls for the CPU*/
+	struct acpi_cpufreq_data *data = per_cpu(acfreq_data, policy->cpu);
+	struct cpufreq_frequency_table *freq_table;
+	unsigned int i;
+	ssize_t count = 0;
+	ssize_t retval;
+
+	if (!check_cpu_control_capability(data)) return -ENODEV; //check if CPU is capable of changing controls
+
+	retval = check_origial_table(data);
+        if (0 != retval)
+		return retval;
+
+	freq_table = data->freq_table;
+
+	for (i = 0; freq_table[i].frequency != CPUFREQ_TABLE_END; i++) {
+		count += sprintf(&buf[count], "%08x", (int)data->original_controls[freq_table[i].index]);
+		//add seperating space
+		if(freq_table[i+1].frequency != CPUFREQ_TABLE_END) count += sprintf(&buf[count], " ");
+	}
+
+	count += sprintf(&buf[count], "\n");	//add NewLine
+	return count;
+}
+
+
+static unsigned int get_fsb_freq(unsigned int cpu) {
+	/*An array of BUS frequencies with an integer as index
+	we get the Index from an MSR register
+	and can "translate" it to a MHz value of the BUS (FSB)
+	so we can calculate the new System Frequency if the user
+	sets new Op-Points
+	*/
+	static int fsb_table[7] = {
+	267,	//msr index value of 0
+	133,	//msr index value of 1
+	200,	//msr index value of 2
+	167,	//msr index value of 3
+	333,	//msr index value of 4
+	100,	//msr index value of 5
+	400,	//msr index value of 6
+	};
+	u32 lofsb_index = 0;
+	u32 hifsb_index = 0;
+	unsigned int retval;
+
+	rdmsr_on_cpu(cpu, MSR_FSB_FREQ, &lofsb_index, &hifsb_index);		//read BUS-Frequency index - could get tricky on i3/i5/i7 CPUs
+	retval = (lofsb_index & INTEL_MSR_FSB_MASK);
+	if (retval > (sizeof(fsb_table)/sizeof(int))) {	//is there an index we do not know yet?
+		printk("PHC: WARNING. FSB Index (%u) is not known. Please report this.\n", retval);
+		retval = 0;
+	} else {
+		retval = fsb_table[retval];
+	}
+    return retval;
+}
+
+
+static ssize_t store_freq_attr_controls(struct cpufreq_policy *policy, const char *buf, size_t count) {
+ /* Store controls (pstate data) from sysfs file to the pstate table
+  * This is only allowed if this module is loaded with "phc_unlock" enabled.
+  * Because we allow setting new pstates here we cannot check much to prevent user from setting
+  * dangerous values. The User hould handle this possibility with care and only if he is aware of
+  * what he is doing.
+  */
+
+	struct acpi_cpufreq_data *data = per_cpu(acfreq_data, policy->cpu);
+	struct acpi_processor_performance *acpi_data;
+	struct cpufreq_frequency_table *freq_table;
+	struct new_oppoints *new_oppoint_table; //save a struct while sorting
+	struct cpuinfo_x86 *c = &cpu_data(policy->cpu);
+
+	ssize_t	retval;				//return value
+	char *opstring;				//one op-point (after seperating the buffer by delimeters)
+	char *pbuf;				//copy of buffer stored here
+	unsigned int opcount = 0;		//count of oppoints set through sysfs interface
+	unsigned int i = 0;			//used in a for loop
+	unsigned int bus_freq = 0;		//calculated Bus Frequency
+	unsigned int curreqspeed = 0;		//Speed equivalent value for current oppoint
+	unsigned int lasteqspeed = 0;		//Speed equivalent value for last oppoint
+	unsigned int round;			//variable used to buffer some values to round frequency
+
+	/*-------------------- Do some Checks --------------------*/
+
+	//CPU not compatible?
+	if (!check_cpu_control_capability(data)) return -ENODEV;
+
+	//check original op-points table
+	retval = check_origial_table(data);
+        if (0 != retval)
+		return retval;
+
+	//To calculate
+	bus_freq = get_fsb_freq(policy->cpu);
+	if ((bus_freq == 0)){				//can not continue without Bus-Freq
+		printk("PHC: Unable to get FSB Bus frequency. Therefore we can not write own pstates. Please report this Error! \n");
+		return -ENODEV;
+	}
+
+	acpi_data = data->acpi_data;
+	freq_table = data->freq_table;
+
+	/*-------------------- prepare --------------------*/
+
+	printk("PHC: Got new pstates through sysfs rawinterface.\n");
+
+	//allocate enough memory for copy buffer
+	pbuf = kmalloc(strlen(buf) ,GFP_KERNEL);
+	if (pbuf == NULL) {
+		printk("PHC: ERROR. Failed to allocate memory for buffer\n");
+		return -ENOMEM;
+	}
+	//copy buffer "buf" to "pbuf"
+	strcpy(pbuf,buf);
+
+	/*-------------------- parse SYSFS Interface File --------------------*/
+
+	//counting the OP-Points (pstates) the user send through the sysfs Interface
+	while ((opstring = strsep((char**) &buf, " ")) != NULL) { //separate by SPACE
+		if (strlen(opstring) >= 3) { opcount++;
+		printk("added: [%s]\n",opstring);
+		};	//count possible OP-Points (Strings with length >= 3 chars)
+	}
+
+	opcount--; //FixMe!
+	printk("PHC: Found 0 - %d OP-Points in SYSFS. Original table contains 0-%d OP-Points.\n", opcount, acpi_data->state_count);
+
+	//currently we can not increase the count of pstates so we check if the user is trying to set more
+	if (opcount > acpi_data->state_count){
+		printk("Adding additional OP-Points is not supported. You need to pass %d P-Points.\n",acpi_data->state_count);
+		return -EINVAL;
+	}
+
+	if (opcount < acpi_data->state_count){
+		printk("Removing OP-Points is not supported. You need to pass %d P-Points.\n",acpi_data->state_count);
+		return -EINVAL;
+	}
+
+	//allocate sufficient memory to store new pstate and additional data
+	new_oppoint_table = kmalloc(opcount*sizeof(struct new_oppoints), GFP_KERNEL);
+
+	//We are going to reuse that value
+	opcount = 0;
+
+	//Now we try to parse the sysfs file. The values shall be space-separated
+	while (((opstring = strsep(&pbuf, " ")) != NULL)) { //separate by SPACE
+		if (strlen(opstring) >= 3) {	//at least 3 chars are required to set FID and VID (see register bitmap)
+
+			//try to convert the string to an integer
+			new_oppoint_table[opcount].pstate = strtoul(opstring, NULL, 16);
+
+			/* we need to make sure that op-points are descending
+			 * therefore we calculate effective values to compare them later */
+			curreqspeed = extract_fid_from_control(new_oppoint_table[opcount].pstate);
+
+			//makes a bitshift rightwise. If SLFM = 1 it shifs by 1 (whats same like dividung by 2)
+			curreqspeed = (curreqspeed >> extract_slfm_from_control(new_oppoint_table[opcount].pstate));
+
+			//by doubling the value we can add "1" instead of "0.5" if NIF is set (no need to use float)
+			curreqspeed *= 2;
+			if (extract_nif_from_control(new_oppoint_table[opcount].pstate)) curreqspeed = (curreqspeed+1);
+
+			//if this is not the first pstate we compare it with the last one to keep sure pstates are in an descending order
+			if (opcount > 0) {
+				//extract FID from current value
+				lasteqspeed = extract_fid_from_control(new_oppoint_table[opcount-1].pstate);
+
+				//makes a bitshift rightwise. If SLFM = 1 it shifs by 1 (whats same like dividung by 2)
+				lasteqspeed = (lasteqspeed >> extract_slfm_from_control(new_oppoint_table[opcount-1].pstate));
+
+				//by doubling the value we can add "1" instead of "0.5" o if NID is set (no need to use float)
+				lasteqspeed *= 2;
+				if (extract_nif_from_control(new_oppoint_table[opcount].pstate)) lasteqspeed = (lasteqspeed+1);
+
+				if (curreqspeed > lasteqspeed) {
+					printk("PHC ERROR: The OPPoint at position %d (starting with 0) is higher than the previous. OPPoints need to be ascending.\n", opcount);
+					kfree(new_oppoint_table);
+					return -EINVAL;
+				};
+
+				if ((new_oppoint_table[opcount].pstate & INTEL_MSR_VID_MASK) > (new_oppoint_table[opcount-1].pstate & INTEL_MSR_VID_MASK)) {
+					printk("PHC ERROR: The VID for OPPoint at position %d (starting with 0) is higher than the previous. It is unlikely that a VID needs to be higher for a lower frequency.\n", opcount);
+					kfree(new_oppoint_table);
+					return -EINVAL;
+				}
+			}; //if opcount
+
+			printk("PHC: Calculated speed equivalent value for OP-Point %d is: %d\n", opcount, curreqspeed);
+
+			//calculating the new frequency
+			if (cpu_has(c, X86_FEATURE_IDA) & (opcount == 0)) {
+				/* If this CPU offers IDA, the highest (first) pstate is defining the data for IDA.
+				 * For some reasons the calculated Frequency for IDA is the same like for the
+				 * default highest pstate increased by 1MHz.
+				 * We will do the same.
+				 */
+				new_oppoint_table[opcount].statefreq = ((bus_freq * (curreqspeed-1)) / 2);
+			} else {
+				new_oppoint_table[opcount].statefreq = ((bus_freq * curreqspeed) / 2);
+			}
+
+			//round values
+			round = new_oppoint_table[opcount].statefreq % 10;
+			if(round>5) new_oppoint_table[opcount].statefreq = new_oppoint_table[opcount].statefreq+(10 - round);
+			       else new_oppoint_table[opcount].statefreq = new_oppoint_table[opcount].statefreq - round;
+
+			//add 1 MHz to frequency if this is an IDA pstate
+			if (cpu_has(c, X86_FEATURE_IDA) & (opcount == 0)) { new_oppoint_table[opcount].statefreq++; };
+
+			//calculate kHz from MHz
+			new_oppoint_table[opcount].statefreq = new_oppoint_table[opcount].statefreq* 1000;
+			printk("PHC: New calculated frequency for pstate %d is: %lu\n", opcount, new_oppoint_table[opcount].statefreq);
+
+			opcount++;
+		} else {
+			if((*opstring == 32) | (*opstring == 10)) {
+				printk("ignoring extra SPACE or LineBreak\n");
+			} else {
+			   printk("PHC: ERROR. Malformed pstate data found at position %d. Stopping. Length: %d , content:[%s]\n", opcount, (int)strlen(opstring), opstring);
+			   return -EINVAL;
+			};
+		}// if strlen
+	} //while opstring = strsep
+
+	/*-------------------- copy new pstates to the acpi table --------------------*/
+	opcount--; //fixme!
+	printk("OPCount vor dem schreiben ist: %d\n", opcount);
+
+	for (i = 0; i <= opcount; i++) {
+		//overwrite ACPI frequency table
+		data->freq_table[i].frequency = new_oppoint_table[i].statefreq;
+		//overwrite Processor frequency table
+		freq_table[i].frequency = 	new_oppoint_table[i].statefreq;
+		//overwrite ACPI controls
+		acpi_data->states[i].control = 	new_oppoint_table[i].pstate;
+	}
+
+	for(i = 0; i < acpi_data->state_count; i++) {
+		printk("acpi_data @ %d: , %lu\n", i, (unsigned long)acpi_data->states[i].control);
+	}
+	/*-------------------- resuming work --------------------*/
+
+	retval = count;
+	data->resume = 1;
+	acpi_cpufreq_target(policy, get_cur_freq_on_cpu(policy->cpu), CPUFREQ_RELATION_L);
+
+    return retval;
+}
+
+
+
+//-------------------------- VIDS interface
+static ssize_t show_freq_attr_vids(struct cpufreq_policy *policy, char *buf) {
+ /*
+  * display VIDs from current pstates
+  */
+	struct acpi_cpufreq_data *data = per_cpu(acfreq_data, policy->cpu);
+	struct acpi_processor_performance *acpi_data;
+	struct cpufreq_frequency_table *freq_table;
+	unsigned int i;
+	unsigned int vid;
+	ssize_t count = 0;
+
+	if (!check_cpu_control_capability(data)) return -ENODEV; //check if CPU is capable of changing controls
+
+	acpi_data = data->acpi_data;
+	freq_table = data->freq_table;
+
+	for (i = 0; freq_table[i].frequency != CPUFREQ_TABLE_END; i++) {
+		vid = extract_vid_from_control(acpi_data->states[freq_table[i].index].control);
+		count += sprintf(&buf[count], "%u", vid);
+		//add seperating space
+		if(freq_table[i+1].frequency != CPUFREQ_TABLE_END) count += sprintf(&buf[count], " ");
+	}
+	count += sprintf(&buf[count], "\n");
+
+	return count;
+}
+
+static ssize_t show_freq_attr_default_vids(struct cpufreq_policy *policy, char *buf) {
+ /*
+  * display VIDs from default pstates
+  */
+	struct acpi_cpufreq_data *data = per_cpu(acfreq_data, policy->cpu);
+	struct cpufreq_frequency_table *freq_table;
+	unsigned int i;
+	unsigned int vid;
+	ssize_t count = 0;
+	ssize_t retval;
+
+	if (!check_cpu_control_capability(data)) return -ENODEV; //check if CPU is capable of changing controls
+
+	retval = check_origial_table(data);
+        if (0 != retval)
+		return retval;
+
+	freq_table = data->freq_table;
+
+	for (i = 0; freq_table[i].frequency != CPUFREQ_TABLE_END; i++) {
+		vid = extract_vid_from_control(data->original_controls[freq_table[i].index]);
+		count += sprintf(&buf[count], "%u", vid);
+		if(freq_table[i+1].frequency != CPUFREQ_TABLE_END) count += sprintf(&buf[count], " ");
+	}
+	count += sprintf(&buf[count], "\n");
+
+	return count;
+}
+
+static ssize_t store_freq_attr_vids(struct cpufreq_policy *policy, const char *buf, size_t count) {
+ /* Store VIDs for the related pstate.
+  * We are going to do some sanity checks here to prevent users
+  * from setting higher voltages than the default one.
+  */
+	struct acpi_cpufreq_data *data = per_cpu(acfreq_data, policy->cpu);
+	struct acpi_processor_performance *acpi_data;
+	struct cpufreq_frequency_table *freq_table;
+	unsigned int freq_index;
+	unsigned int state_index;
+	unsigned int new_vid;
+	unsigned int original_vid;
+	unsigned int new_control;
+	unsigned int original_control;
+	const char *curr_buf = buf;
+	char *next_buf;
+	ssize_t retval;
+
+	if (!check_cpu_control_capability(data)) return -ENODEV; //check if CPU is capable of changing controls
+
+	retval = check_origial_table(data);
+        if (0 != retval)
+		return retval;
+
+	acpi_data = data->acpi_data;
+	freq_table = data->freq_table;
+
+	printk("PHC: Got new VIDs through sysfs VID interface.\n");
+	/* for each value taken from the sysfs interfalce (phc_vids) get entrys and convert them to unsigned long integers*/
+	for (freq_index = 0; freq_table[freq_index].frequency != CPUFREQ_TABLE_END; freq_index++) {
+		new_vid = simple_strtoul(curr_buf, &next_buf, 10);
+		if (next_buf == curr_buf) {
+			if ((curr_buf - buf == count - 1) && (*curr_buf == '\n')) {   //end of line?
+				curr_buf++;
+				break;
+			}
+			//if we didn't got end of line but there is nothing more to read something went wrong...
+			printk("PHC: Failed to parse vid value at %i (%s)\n", freq_index, curr_buf);
+			return -EINVAL;
+		}
+
+		state_index = freq_table[freq_index].index;
+		original_control = data->original_controls[state_index];
+		original_vid = original_control & INTEL_MSR_VID_MASK;
+
+		/* before we store the values we do some checks to prevent
+		   users to set up values higher than the default one */
+		if (new_vid <= original_vid) {
+			new_control = (original_control & ~INTEL_MSR_VID_MASK) | new_vid;
+			dprintk("PHC: Setting control at %i to %x (default is %x)\n",
+			        freq_index, new_control, original_control);
+			acpi_data->states[state_index].control = new_control;
+
+		} else {
+			printk("PHC: Skipping vid at %i, %u is greater than default %u\n",
+			       freq_index, new_vid, original_vid);
+		}
+
+		curr_buf = next_buf;
+		/* jump over value seperators (space or comma).
+		 * There could be more than one space or comma character
+		 * to separate two values so we better do it using a loop.
+		 */
+		while ((curr_buf - buf < count) && ((*curr_buf == ' ') || (*curr_buf == ','))) {
+			curr_buf++;
+		}
+	}
+
+	/* set new voltage for current frequency */
+	data->resume = 1;
+	acpi_cpufreq_target(policy, get_cur_freq_on_cpu(policy->cpu), CPUFREQ_RELATION_L);
+
+	return curr_buf - buf;
+}
+
+static ssize_t show_freq_attr_phc_version(struct cpufreq_policy *policy, char *buf) {
+	/* print out the phc version string set at the beginning of that file*/
+	ssize_t count = 0;
+	count += sprintf(&buf[count], "%s\n", PHC_VERSION_STRING);
+	return count;
+}
+
+
+
+static struct freq_attr cpufreq_freq_attr_phc_version =
+{
+	/*display PHC version*/
+       .attr = { .name = "phc_version", .mode = 0444, .owner = THIS_MODULE },
+       .show = show_freq_attr_phc_version,
+       .store = NULL,
+};
+
+static struct freq_attr cpufreq_freq_attr_controls =
+{
+	/*display default rawcontrols*/
+       .attr = { .name = "phc_rawcontrols", .mode = 0644, .owner = THIS_MODULE },
+       .show = show_freq_attr_controls,
+       .store = store_freq_attr_controls,
+};
+
+
+static struct freq_attr cpufreq_freq_attr_default_controls =
+{
+	/*display default rawcontrols*/
+       .attr = { .name = "phc_default_rawcontrols", .mode = 0444, .owner = THIS_MODULE },
+       .show = show_freq_attr_default_controls,
+       .store = NULL,
+};
+
+static struct freq_attr cpufreq_freq_attr_vids =
+{
+	/*display current VIDs*/
+       .attr = { .name = "phc_vids", .mode = 0644, .owner = THIS_MODULE },
+       .show = show_freq_attr_vids,
+       .store = store_freq_attr_vids,
+};
+
+static struct freq_attr cpufreq_freq_attr_default_vids =
+{
+	/*display default VIDs*/
+       .attr = { .name = "phc_default_vids", .mode = 0444, .owner = THIS_MODULE },
+       .show = show_freq_attr_default_vids,
+       .store = NULL,
+};
+
 static struct freq_attr *acpi_cpufreq_attr[] = {
 	&cpufreq_freq_attr_scaling_available_freqs,
+	&cpufreq_freq_attr_phc_version,
+	&cpufreq_freq_attr_controls,
+	&cpufreq_freq_attr_default_controls,
+	&cpufreq_freq_attr_vids,
+	&cpufreq_freq_attr_default_vids,
 	NULL,
 };
 
@@ -768,9 +1372,20 @@ static void __exit acpi_cpufreq_exit(void)
 }
 
 module_param(acpi_pstate_strict, uint, 0644);
+module_param(phc_unlock, uint, 0644);
+module_param(phc_forceida, uint, 0644);
+
 MODULE_PARM_DESC(acpi_pstate_strict,
 	"value 0 or non-zero. non-zero -> strict ACPI checks are "
 	"performed during frequency changes.");
+
+MODULE_PARM_DESC(phc_unlock,
+	"value 0 or non-zero. non-zero -> Enables altering OP-Points"
+	"(change FID, NIF, SLFM)");
+
+MODULE_PARM_DESC(phc_forceida,
+	"value 0 or non-zero. non-zero -> Forces setting X86_FEATURE_IDA to TRUE"
+	"(for buggy BIOSes that offer an IDA pstate but does not expose that feature in CPUID)");
 
 late_initcall(acpi_cpufreq_init);
 module_exit(acpi_cpufreq_exit);
