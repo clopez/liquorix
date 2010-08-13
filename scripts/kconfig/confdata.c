@@ -452,10 +452,11 @@ int conf_write(const char *name)
 
 	fprintf(out, _("#\n"
 		       "# Automatically generated make config: don't edit\n"
-		       "# Linux kernel version: %s\n"
+		       "# Linux kernel version: %s \"%s\"\n"
 		       "%s%s"
 		       "#\n"),
 		     sym_get_string_value(sym),
+                     getenv("NAME"),
 		     use_timestamp ? "# " : "",
 		     use_timestamp ? ctime(&now) : "");
 
@@ -710,19 +711,21 @@ int conf_write_autoconf(void)
 	time(&now);
 	fprintf(out, "#\n"
 		     "# Automatically generated make config: don't edit\n"
-		     "# Linux kernel version: %s\n"
+		     "# Linux kernel version: %s \"%s\"\n"
 		     "# %s"
 		     "#\n",
+                     getenv("NAME"),
 		     sym_get_string_value(sym), ctime(&now));
 	fprintf(tristate, "#\n"
 			  "# Automatically generated - do not edit\n"
 			  "\n");
 	fprintf(out_h, "/*\n"
 		       " * Automatically generated C config: don't edit\n"
-		       " * Linux kernel version: %s\n"
+		       " * Linux kernel version: %s \"%s\"\n"
 		       " * %s"
 		       " */\n"
 		       "#define AUTOCONF_INCLUDED\n",
+                       getenv("NAME"),
 		       sym_get_string_value(sym), ctime(&now));
 
 	for_all_symbols(i, sym) {

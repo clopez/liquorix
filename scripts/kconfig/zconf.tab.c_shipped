@@ -2216,15 +2216,19 @@ void conf_parse(const char *name)
 {
 	struct symbol *sym;
 	int i;
+	static char title[200];
 
 	zconf_initscan(name);
+
+	sprintf(title,"Linux Kernel v%s \"%s\" Configuration",
+		getenv("KERNELVERSION"), getenv("NAME"));
 
 	sym_init();
 	_menu_init();
 	modules_sym = sym_lookup(NULL, 0);
 	modules_sym->type = S_BOOLEAN;
 	modules_sym->flags |= SYMBOL_AUTO;
-	rootmenu.prompt = menu_add_prompt(P_MENU, "Linux Kernel Configuration", NULL);
+	rootmenu.prompt = menu_add_prompt(P_MENU, title, NULL);
 
 #if YYDEBUG
 	if (getenv("ZCONF_DEBUG"))
