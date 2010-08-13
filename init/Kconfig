@@ -926,6 +926,32 @@ config CC_OPTIMIZE_FOR_SIZE
 
 	  If unsure, say Y.
 
+menu "Custom Build Flags"
+
+config CUSTOM_CFLAGS
+    string "Custom CFLAGS for kernel"
+    default ""
+    help
+        You can use this to easily set custom gcc CFLAGS to be used for the
+        entire kernel (including modules).
+
+	No warning for you, i can't fix stupidity.
+
+        If unsure, leave blank.
+
+config CUSTOM_MAKEFLAGS
+    string "Custom MAKEFLAGS for kernel"
+    default ""
+    help
+        You can use this to easily set custom MAKEFLAGS to be used for building
+        the entire kernel.
+
+	(Or just use the options when you run make?)
+
+        If unsure, leave blank.
+
+endmenu
+
 config SYSCTL
 	bool
 
