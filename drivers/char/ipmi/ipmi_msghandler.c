@@ -2052,6 +2052,25 @@ static void remove_proc_entries(ipmi_smi_t smi)
 #endif /* CONFIG_PROC_FS */
 }
 
+/*
+ * Retrieves the bmc_device struct for a given ipmi interface number (or NULL if none).
+ */
+struct device *ipmi_get_bmcdevice(int if_num)
+{
+	ipmi_smi_t intf;
+	mutex_lock(&ipmi_interfaces_mutex);
+	list_for_each_entry_rcu(intf, &ipmi_interfaces, link) {
+		if (intf->intf_num == if_num){
+			mutex_unlock(&ipmi_interfaces_mutex);
+			return &intf->bmc->dev->dev;
+		}
+	}
+	mutex_unlock(&ipmi_interfaces_mutex);
+
+	return NULL;
+}
+EXPORT_SYMBOL(ipmi_get_bmcdevice);
+
 static int __find_bmc_guid(struct device *dev, void *data)
 {
 	unsigned char *id = data;
