@@ -1,8 +1,8 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 35
-EXTRAVERSION =
-NAME = Sheep on Meth
+EXTRAVERSION = -zen0
+NAME = Untested Master
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
