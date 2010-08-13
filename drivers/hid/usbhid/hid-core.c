@@ -48,7 +48,11 @@
  * Module parameters.
  */
 
+#if defined(CONFIG_USB_HID_MOUSE_POLLING)
+int hid_mousepoll_interval __read_mostly = CONFIG_USB_HID_MOUSE_POLLING_INTERVAL;
+#else
 static unsigned int hid_mousepoll_interval;
+#endif
 module_param_named(mousepoll, hid_mousepoll_interval, uint, 0644);
 MODULE_PARM_DESC(mousepoll, "Polling interval of mice");
 
