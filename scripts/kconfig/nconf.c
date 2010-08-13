@@ -8,6 +8,7 @@
 #define LKC_DIRECT_LINK
 #include "lkc.h"
 #include "nconf.h"
+#include "zen.h"
 
 static const char nconf_readme[] = N_(
 "Overview\n"
@@ -1492,7 +1493,7 @@ void setup_windows(void)
 
 int main(int ac, char **av)
 {
-	char *mode;
+	char *message, *mode;
 
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
@@ -1522,6 +1523,16 @@ int main(int ac, char **av)
 		printf("Your terminal should have at "
 			"least 20 lines and 75 columns\n");
 		return 1;
+	}
+
+	clear();
+
+	message = read_readme("README.zen");
+	if (message) {
+		show_scroll_win(main_window,
+				_("Zen Kernel"), message);
+		free(message);
+		clear();
 	}
 
 	notimeout(stdscr, FALSE);

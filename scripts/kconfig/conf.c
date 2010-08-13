@@ -16,6 +16,8 @@
 #define LKC_DIRECT_LINK
 #include "lkc.h"
 
+#include "zen.h"
+
 static void conf(struct menu *menu);
 static void check_conf(struct menu *menu);
 
@@ -431,7 +433,7 @@ static void check_conf(struct menu *menu)
 
 int main(int ac, char **av)
 {
-	int opt;
+	int opt, proceed;
 	const char *name;
 	struct stat tmpstat;
 
@@ -562,6 +564,18 @@ int main(int ac, char **av)
 			}
 		}
 		valid_stdin = isatty(0) && isatty(1) && isatty(2);
+	} else {
+		char *message;
+
+		clear_screen();
+		message = read_readme("README.zen");
+		if (message) {
+			printf(message);
+			free(message);
+			printf("\nPress any key to continue!");
+			proceed = get_character();
+			printf("\n\n");
+		}
 	}
 
 	switch (input_mode) {

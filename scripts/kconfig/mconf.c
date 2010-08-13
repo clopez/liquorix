@@ -22,6 +22,8 @@
 #include "lkc.h"
 #include "lxdialog/dialog.h"
 
+#include "zen.h"
+
 static const char mconf_readme[] = N_(
 "Overview\n"
 "--------\n"
@@ -802,7 +804,7 @@ static void conf_save(void)
 int main(int ac, char **av)
 {
 	int saved_x, saved_y;
-	char *mode;
+	char *message, *mode;
 	int res;
 
 	setlocale(LC_ALL, "");
@@ -825,6 +827,15 @@ int main(int ac, char **av)
 		fprintf(stderr, N_("Your display is too small to run Menuconfig!\n"));
 		fprintf(stderr, N_("It must be at least 19 lines by 80 columns.\n"));
 		return 1;
+	}
+
+	dialog_clear();
+
+	message = read_readme("README.zen");
+	if (message) {
+		show_helptext(_("Zen Notes"), message);
+		free(message);
+		dialog_clear();
 	}
 
 	set_config_filename(conf_get_configname());
