@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2004 - 2009 Ivo van Doorn <IvDoorn@gmail.com>
+	Copyright (C) 2004 - 2010 Ivo van Doorn <IvDoorn@gmail.com>
 	<http://rt2x00.serialmonkey.com>
 
 	This program is free software; you can redistribute it and/or modify
@@ -213,9 +213,16 @@ struct rxdone_entry_desc {
 /**
  * enum txdone_entry_desc_flags: Flags for &struct txdone_entry_desc
  *
+ * Every txdone report has to contain the basic result of the
+ * transmission, either &TXDONE_UNKNOWN, &TXDONE_SUCCESS or
+ * &TXDONE_FAILURE. The flag &TXDONE_FALLBACK can be used in
+ * conjunction with all of these flags but should only be set
+ * if retires > 0. The flag &TXDONE_EXCESSIVE_RETRY can only be used
+ * in conjunction with &TXDONE_FAILURE.
+ *
  * @TXDONE_UNKNOWN: Hardware could not determine success of transmission.
  * @TXDONE_SUCCESS: Frame was successfully send
- * @TXDONE_FALLBACK: Frame was successfully send using a fallback rate.
+ * @TXDONE_FALLBACK: Hardware used fallback rates for retries
  * @TXDONE_FAILURE: Frame was not successfully send
  * @TXDONE_EXCESSIVE_RETRY: In addition to &TXDONE_FAILURE, the
  *	frame transmission failed due to excessive retries.
@@ -261,6 +268,7 @@ struct txdone_entry_desc {
  * @ENTRY_TXD_HT_AMPDU: This frame is part of an AMPDU.
  * @ENTRY_TXD_HT_BW_40: Use 40MHz Bandwidth.
  * @ENTRY_TXD_HT_SHORT_GI: Use short GI.
+ * @ENTRY_TXD_HT_MIMO_PS: The receiving STA is in dynamic SM PS mode.
  */
 enum txentry_desc_flags {
 	ENTRY_TXD_RTS_FRAME,
@@ -279,6 +287,7 @@ enum txentry_desc_flags {
 	ENTRY_TXD_HT_AMPDU,
 	ENTRY_TXD_HT_BW_40,
 	ENTRY_TXD_HT_SHORT_GI,
+	ENTRY_TXD_HT_MIMO_PS,
 };
 
 /**
@@ -356,12 +365,16 @@ struct txentry_desc {
  *	the device has signaled it is done with it.
  * @ENTRY_DATA_PENDING: This entry contains a valid frame and is waiting
  *	for the signal to start sending.
+ * @ENTRY_DATA_IO_FAILED: Hardware indicated that an IO error occured
+ *	while transfering the data to the hardware. No TX status report will
+ *	be expected from the hardware.
  */
 enum queue_entry_flags {
 	ENTRY_BCN_ASSIGNED,
 	ENTRY_OWNER_DEVICE_DATA,
 	ENTRY_OWNER_DEVICE_CRYPTO,
 	ENTRY_DATA_PENDING,
+	ENTRY_DATA_IO_FAILED
 };
 
 /**
@@ -439,6 +452,8 @@ struct data_queue {
 	enum data_queue_qid qid;
 
 	spinlock_t lock;
+	unsigned long last_index;
+	unsigned long last_index_done;
 	unsigned int count;
 	unsigned short limit;
 	unsigned short threshold;
@@ -589,6 +604,15 @@ static inline int rt2x00queue_available(struct data_queue *queue)
 static inline int rt2x00queue_threshold(struct data_queue *queue)
 {
 	return rt2x00queue_available(queue) < queue->threshold;
+}
+
+/**
+ * rt2x00queue_timeout - Check if a timeout occured for this queue
+ * @queue: Queue to check.
+ */
+static inline int rt2x00queue_timeout(struct data_queue *queue)
+{
+	return time_after(queue->last_index, queue->last_index_done + (HZ / 10));
 }
 
 /**

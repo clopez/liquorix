@@ -41,10 +41,12 @@ void rt2x00lib_config_intf(struct rt2x00_dev *rt2x00dev,
 
 	switch (type) {
 	case NL80211_IFTYPE_ADHOC:
+		conf.sync = TSF_SYNC_ADHOC;
+		break;
 	case NL80211_IFTYPE_AP:
 	case NL80211_IFTYPE_MESH_POINT:
 	case NL80211_IFTYPE_WDS:
-		conf.sync = TSF_SYNC_BEACON;
+		conf.sync = TSF_SYNC_AP_NONE;
 		break;
 	case NL80211_IFTYPE_STATION:
 		conf.sync = TSF_SYNC_INFRA;
@@ -170,23 +172,27 @@ void rt2x00lib_config(struct rt2x00_dev *rt2x00dev,
 		      unsigned int ieee80211_flags)
 {
 	struct rt2x00lib_conf libconf;
+	u16 hw_value;
 
 	memset(&libconf, 0, sizeof(libconf));
 
 	libconf.conf = conf;
 
 	if (ieee80211_flags & IEEE80211_CONF_CHANGE_CHANNEL) {
-		if (conf_is_ht40(conf))
+		if (conf_is_ht40(conf)) {
 			__set_bit(CONFIG_CHANNEL_HT40, &rt2x00dev->flags);
-		else
+			hw_value = rt2x00ht_center_channel(rt2x00dev, conf);
+		} else {
 			__clear_bit(CONFIG_CHANNEL_HT40, &rt2x00dev->flags);
+			hw_value = conf->channel->hw_value;
+		}
 
 		memcpy(&libconf.rf,
-		       &rt2x00dev->spec.channels[conf->channel->hw_value],
+		       &rt2x00dev->spec.channels[hw_value],
 		       sizeof(libconf.rf));
 
 		memcpy(&libconf.channel,
-		       &rt2x00dev->spec.channels_info[conf->channel->hw_value],
+		       &rt2x00dev->spec.channels_info[hw_value],
 		       sizeof(libconf.channel));
 	}
 
@@ -203,10 +209,8 @@ void rt2x00lib_config(struct rt2x00_dev *rt2x00dev,
 		rt2x00link_reset_tuner(rt2x00dev, false);
 
 	rt2x00dev->curr_band = conf->channel->band;
+	rt2x00dev->curr_freq = conf->channel->center_freq;
 	rt2x00dev->tx_power = conf->power_level;
 	rt2x00dev->short_retry = conf->short_frame_max_tx_count;
 	rt2x00dev->long_retry = conf->long_frame_max_tx_count;
-
-	rt2x00dev->rx_status.band = conf->channel->band;
-	rt2x00dev->rx_status.freq = conf->channel->center_freq;
 }
