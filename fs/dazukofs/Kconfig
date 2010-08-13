@@ -1,0 +1,11 @@
+config DAZUKOFS_FS
+	tristate "DazukoFS filesystem layer support (EXPERIMENTAL)"
+	depends on EXPERIMENTAL
+	help
+	  A stackable filesystem to allow userspace applications to perform
+	  online file access control.
+	  See <file:Documentation/filesystems/dazukofs.txt> to learn more
+	  about DazukoFS.
+
+	  To compile this file system support as a module, choose M here: the
+	  module will be called dazukofs.
