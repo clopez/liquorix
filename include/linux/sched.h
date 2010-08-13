@@ -1554,7 +1554,6 @@ static inline int iso_task(struct task_struct *p)
 	return (p->policy == SCHED_ISO);
 }
 extern void remove_cpu(unsigned long cpu);
-extern int above_background_load(void);
 #else /* CFS */
 extern int runqueue_is_locked(int cpu);
 
@@ -1604,6 +1603,9 @@ static inline int above_background_load(void)
 	return 1;
 }
 #endif /* CONFIG_SCHED_BFS */
+
+/* CFS and BFS */
+extern int above_background_load(void);
 
 /* Future-safe accessor for struct task_struct's cpus_allowed. */
 #define tsk_cpus_allowed(tsk) (&(tsk)->cpus_allowed)
