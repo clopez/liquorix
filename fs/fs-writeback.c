@@ -461,8 +461,10 @@ static bool pin_sb_for_writeback(struct super_block *sb)
  * Return 1, if the caller writeback routine should be
  * interrupted. Otherwise return 0.
  */
-static int writeback_sb_inodes(struct super_block *sb, struct bdi_writeback *wb,
-		struct writeback_control *wbc, bool only_this_sb)
+int generic_writeback_sb_inodes(struct super_block *sb,
+				struct bdi_writeback *wb,
+				struct writeback_control *wbc,
+				bool only_this_sb)
 {
 	while (!list_empty(&wb->b_io)) {
 		long pages_skipped;
@@ -544,7 +546,10 @@ void writeback_inodes_wb(struct bdi_writeback *wb,
 			requeue_io(inode);
 			continue;
 		}
-		ret = writeback_sb_inodes(sb, wb, wbc, false);
+		if (sb->s_op->writeback_inodes)
+			ret = sb->s_op->writeback_inodes(sb, wb, wbc, false);
+		else
+			ret = generic_writeback_sb_inodes(sb, wb, wbc, false);
 		drop_super(sb);
 
 		if (ret)
@@ -553,6 +558,7 @@ void writeback_inodes_wb(struct bdi_writeback *wb,
 	spin_unlock(&inode_lock);
 	/* Leave any unwritten inodes on b_io */
 }
+EXPORT_SYMBOL(writeback_inodes_wb);
 
 static void __writeback_inodes_sb(struct super_block *sb,
 		struct bdi_writeback *wb, struct writeback_control *wbc)
@@ -563,7 +569,7 @@ static void __writeback_inodes_sb(struct super_block *sb,
 	spin_lock(&inode_lock);
 	if (!wbc->for_kupdate || list_empty(&wb->b_io))
 		queue_io(wb, wbc->older_than_this);
-	writeback_sb_inodes(sb, wb, wbc, true);
+	generic_writeback_sb_inodes(sb, wb, wbc, true);
 	spin_unlock(&inode_lock);
 }
 
@@ -680,6 +686,32 @@ static long wb_writeback(struct bdi_writeback *wb,
 
 	return wrote;
 }
+EXPORT_SYMBOL(generic_writeback_sb_inodes);
+
+/*
+ * This function is for file systems which have their
+ * own means of periodical write-out of old data.
+ * NOTE: inode_lock should be hold.
+ *
+ * Skip a portion of b_io inodes which belong to @sb
+ * and go sequentially in reverse order.
+ */
+void writeback_skip_sb_inodes(struct super_block *sb,
+			      struct bdi_writeback *wb)
+{
+	while (1) {
+		struct inode *inode;
+
+		if (list_empty(&wb->b_io))
+			break;
+		inode = list_entry(wb->b_io.prev, struct inode, i_list);
+		if (sb != inode->i_sb)
+			break;
+		redirty_tail(inode);
+	}
+}
+EXPORT_SYMBOL(writeback_skip_sb_inodes);
+
 
 /*
  * Return the next wb_writeback_work struct that hasn't been processed yet.
@@ -1159,3 +1191,12 @@ int sync_inode(struct inode *inode, struct writeback_control *wbc)
 	return ret;
 }
 EXPORT_SYMBOL(sync_inode);
+/*
+ * Local variables:
+ * c-indentation-style: "K&R"
+ * mode-name: "LC"
+ * c-basic-offset: 8
+ * tab-width: 8
+ * fill-column: 79
+ * End:
+ */

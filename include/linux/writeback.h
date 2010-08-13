@@ -13,6 +13,12 @@ extern spinlock_t inode_lock;
 extern struct list_head inode_in_use;
 extern struct list_head inode_unused;
 
+static inline int is_flush_bd_task(struct task_struct *task)
+{
+       return task->flags & PF_FLUSHER;
+}
+#define current_is_flush_bd_task()  is_flush_bd_task(current)
+
 /*
  * fs/fs-writeback.c
  */
