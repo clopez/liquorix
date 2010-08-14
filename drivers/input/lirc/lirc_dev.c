@@ -36,8 +36,11 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include <linux/smp_lock.h>
+#ifdef CONFIG_COMPAT
+#include <linux/compat.h>
+#endif
 
-#include <linux/lirc.h>
+#include "lirc.h"
 #include "lirc_dev.h"
 
 static int debug;
@@ -53,7 +56,7 @@ struct irctl {
 	int attached;
 	int open;
 
-	struct mutex irctl_lock;
+	struct mutex buffer_lock;
 	struct lirc_buffer *buf;
 	unsigned int chunk_size;
 
@@ -77,7 +80,7 @@ static void init_irctl(struct irctl *ir)
 {
 	dev_dbg(ir->d.dev, LOGHEAD "initializing irctl\n",
 		ir->d.name, ir->d.minor);
-	mutex_init(&ir->irctl_lock);
+	mutex_init(&ir->buffer_lock);
 	ir->d.minor = NOPLUG;
 }
 
@@ -162,6 +165,9 @@ static struct file_operations fops = {
 	.write		= lirc_dev_fop_write,
 	.poll		= lirc_dev_fop_poll,
 	.ioctl		= lirc_dev_fop_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= lirc_dev_fop_compat_ioctl,
+#endif
 	.open		= lirc_dev_fop_open,
 	.release	= lirc_dev_fop_close,
 };
@@ -314,7 +320,8 @@ int lirc_register_driver(struct lirc_driver *d)
 	ir->chunk_size = ir->buf->chunk_size;
 
 	if (d->features == 0)
-		d->features = LIRC_CAN_REC_LIRCCODE;
+		d->features = (d->code_length > 8) ?
+			LIRC_CAN_REC_LIRCCODE : LIRC_CAN_REC_CODE;
 
 	ir->d = *d;
 	ir->d.minor = minor;
@@ -389,10 +396,10 @@ int lirc_unregister_driver(int minor)
 		dev_dbg(ir->d.dev, LOGHEAD "releasing opened driver\n",
 			ir->d.name, ir->d.minor);
 		wake_up_interruptible(&ir->buf->wait_poll);
-		mutex_lock(&ir->irctl_lock);
+		mutex_lock(&ir->buffer_lock);
 		ir->d.set_use_dec(ir->d.data);
 		module_put(ir->d.owner);
-		mutex_unlock(&ir->irctl_lock);
+		mutex_unlock(&ir->buffer_lock);
 		cdev_del(&ir->cdev);
 	} else {
 		cleanup(ir);
@@ -496,7 +503,7 @@ unsigned int lirc_dev_fop_poll(struct file *file, poll_table *wait)
 	dev_dbg(ir->d.dev, LOGHEAD "poll called\n", ir->d.name, ir->d.minor);
 
 	if (!ir->attached) {
-		mutex_unlock(&ir->irctl_lock);
+		mutex_unlock(&ir->buffer_lock);
 		return POLLERR;
 	}
 
@@ -571,6 +578,100 @@ int lirc_dev_fop_ioctl(struct inode *inode, struct file *file,
 }
 EXPORT_SYMBOL(lirc_dev_fop_ioctl);
 
+#ifdef CONFIG_COMPAT
+#define LIRC_GET_FEATURES_COMPAT32     _IOR('i', 0x00000000, __u32)
+
+#define LIRC_GET_SEND_MODE_COMPAT32    _IOR('i', 0x00000001, __u32)
+#define LIRC_GET_REC_MODE_COMPAT32     _IOR('i', 0x00000002, __u32)
+
+#define LIRC_GET_LENGTH_COMPAT32       _IOR('i', 0x0000000f, __u32)
+
+#define LIRC_SET_SEND_MODE_COMPAT32    _IOW('i', 0x00000011, __u32)
+#define LIRC_SET_REC_MODE_COMPAT32     _IOW('i', 0x00000012, __u32)
+
+long lirc_dev_fop_compat_ioctl(struct file *file,
+			       unsigned int cmd32,
+			       unsigned long arg)
+{
+	mm_segment_t old_fs;
+	int ret;
+	unsigned long val;
+	unsigned int cmd;
+
+	switch (cmd32) {
+	case LIRC_GET_FEATURES_COMPAT32:
+	case LIRC_GET_SEND_MODE_COMPAT32:
+	case LIRC_GET_REC_MODE_COMPAT32:
+	case LIRC_GET_LENGTH_COMPAT32:
+	case LIRC_SET_SEND_MODE_COMPAT32:
+	case LIRC_SET_REC_MODE_COMPAT32:
+		/*
+		 * These commands expect (unsigned long *) arg
+		 * but the 32-bit app supplied (__u32 *).
+		 * Conversion is required.
+		 */
+		if (get_user(val, (__u32 *)compat_ptr(arg)))
+			return -EFAULT;
+		lock_kernel();
+		/*
+		 * tell lirc_dev_fop_ioctl that it's safe to use the pointer
+		 * to val which is in kernel address space and not in
+		 * user address space.
+		 */
+		old_fs = get_fs();
+		set_fs(KERNEL_DS);
+
+		cmd = _IOC(_IOC_DIR(cmd32), _IOC_TYPE(cmd32), _IOC_NR(cmd32),
+		(_IOC_TYPECHECK(unsigned long)));
+		ret = lirc_dev_fop_ioctl(file->f_path.dentry->d_inode, file,
+					 cmd, (unsigned long)(&val));
+
+		set_fs(old_fs);
+		unlock_kernel();
+	switch (cmd) {
+	case LIRC_GET_FEATURES:
+	case LIRC_GET_SEND_MODE:
+	case LIRC_GET_REC_MODE:
+	case LIRC_GET_LENGTH:
+		if (!ret && put_user(val, (__u32 *)compat_ptr(arg)))
+			return -EFAULT;
+		break;
+	}
+	return ret;
+
+	case LIRC_GET_SEND_CARRIER:
+	case LIRC_GET_REC_CARRIER:
+	case LIRC_GET_SEND_DUTY_CYCLE:
+	case LIRC_GET_REC_DUTY_CYCLE:
+	case LIRC_GET_REC_RESOLUTION:
+	case LIRC_SET_SEND_CARRIER:
+	case LIRC_SET_REC_CARRIER:
+	case LIRC_SET_SEND_DUTY_CYCLE:
+	case LIRC_SET_REC_DUTY_CYCLE:
+	case LIRC_SET_TRANSMITTER_MASK:
+	case LIRC_SET_REC_DUTY_CYCLE_RANGE:
+	case LIRC_SET_REC_CARRIER_RANGE:
+		/*
+		 * These commands expect (unsigned int *)arg
+		 * so no problems here. Just handle the locking.
+		 */
+		lock_kernel();
+		cmd = cmd32;
+		ret = lirc_dev_fop_ioctl(file->f_path.dentry->d_inode,
+					 file, cmd, arg);
+		unlock_kernel();
+		return ret;
+	default:
+		/* unknown */
+		printk(KERN_ERR "lirc_dev: %s(%s:%d): Unknown cmd %08x\n",
+		       __func__, current->comm, current->pid, cmd32);
+		return -ENOIOCTLCMD;
+	}
+}
+EXPORT_SYMBOL(lirc_dev_fop_compat_ioctl);
+#endif
+
+
 ssize_t lirc_dev_fop_read(struct file *file,
 			  char *buffer,
 			  size_t length,
@@ -583,17 +684,17 @@ ssize_t lirc_dev_fop_read(struct file *file,
 
 	dev_dbg(ir->d.dev, LOGHEAD "read called\n", ir->d.name, ir->d.minor);
 
-	if (mutex_lock_interruptible(&ir->irctl_lock))
+	if (mutex_lock_interruptible(&ir->buffer_lock))
 		return -ERESTARTSYS;
 	if (!ir->attached) {
-		mutex_unlock(&ir->irctl_lock);
+		mutex_unlock(&ir->buffer_lock);
 		return -ENODEV;
 	}
 
 	if (length % ir->chunk_size) {
 		dev_dbg(ir->d.dev, LOGHEAD "read result = -EINVAL\n",
 			ir->d.name, ir->d.minor);
-		mutex_unlock(&ir->irctl_lock);
+		mutex_unlock(&ir->buffer_lock);
 		return -EINVAL;
 	}
 
@@ -626,11 +727,11 @@ ssize_t lirc_dev_fop_read(struct file *file,
 				break;
 			}
 
-			mutex_unlock(&ir->irctl_lock);
+			mutex_unlock(&ir->buffer_lock);
 			schedule();
 			set_current_state(TASK_INTERRUPTIBLE);
 
-			if (mutex_lock_interruptible(&ir->irctl_lock)) {
+			if (mutex_lock_interruptible(&ir->buffer_lock)) {
 				ret = -ERESTARTSYS;
 				break;
 			}
@@ -649,7 +750,7 @@ ssize_t lirc_dev_fop_read(struct file *file,
 
 	remove_wait_queue(&ir->buf->wait_poll, &wait);
 	set_current_state(TASK_RUNNING);
-	mutex_unlock(&ir->irctl_lock);
+	mutex_unlock(&ir->buffer_lock);
 
 	dev_dbg(ir->d.dev, LOGHEAD "read result = %s (%d)\n",
 		ir->d.name, ir->d.minor, ret ? "-EFAULT" : "OK", ret);

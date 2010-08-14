@@ -38,7 +38,7 @@
 #include <linux/uaccess.h>
 #include <linux/usb.h>
 
-#include <linux/lirc.h>
+#include "lirc.h"
 #include "lirc_dev.h"
 
 #define DRIVER_VERSION	"1.28"
@@ -494,7 +494,7 @@ static int streamzap_probe(struct usb_interface *interface,
 	/* Allocate the USB buffer and IRQ URB */
 
 	sz->buf_in_len = sz->endpoint->wMaxPacketSize;
-	sz->buf_in = usb_buffer_alloc(sz->udev, sz->buf_in_len,
+	sz->buf_in = usb_alloc_coherent(sz->udev, sz->buf_in_len,
 				      GFP_ATOMIC, &sz->dma_in);
 	if (sz->buf_in == NULL)
 		goto free_sz;
@@ -597,7 +597,7 @@ free_sz:
 
 	if (sz) {
 		usb_free_urb(sz->urb_in);
-		usb_buffer_free(udev, sz->buf_in_len, sz->buf_in, sz->dma_in);
+		usb_free_coherent(udev, sz->buf_in_len, sz->buf_in, sz->dma_in);
 		kfree(sz);
 	}
 
@@ -703,7 +703,7 @@ static void streamzap_disconnect(struct usb_interface *interface)
 
 	usb_free_urb(sz->urb_in);
 
-	usb_buffer_free(sz->udev, sz->buf_in_len, sz->buf_in, sz->dma_in);
+	usb_free_coherent(sz->udev, sz->buf_in_len, sz->buf_in, sz->dma_in);
 
 	minor = sz->driver->minor;
 	kfree(sz->driver->rbuf);

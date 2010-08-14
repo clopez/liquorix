@@ -428,15 +428,16 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		ir->l.add_to_buf = add_to_buf_pv951;
 		break;
 	case 0x71:
-		if (adap->id == I2C_HW_B_CX2388x)
-			strlcpy(ir->c.name, "Hauppauge HVR1300", I2C_NAME_SIZE);
-		else /* bt8xx or cx2341x */
+		if (adap->id == I2C_HW_B_BT848 ||
+		    adap->id == I2C_HW_B_CX2341X) {
 			/*
 			 * The PVR150 IR receiver uses the same protocol as
 			 * other Hauppauge cards, but the data flow is
 			 * different, so we need to deal with it by its own.
 			 */
 			strlcpy(ir->c.name, "Hauppauge PVR150", I2C_NAME_SIZE);
+		} else /* I2C_HW_B_CX2388x */
+			strlcpy(ir->c.name, "Hauppauge HVR1300", I2C_NAME_SIZE);
 		ir->l.code_length = 13;
 		ir->l.add_to_buf = add_to_buf_haup_pvr150;
 		break;
@@ -447,14 +448,15 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		break;
 	case 0x18:
 	case 0x1a:
-		if (adap->id == I2C_HW_B_CX2388x) {
-			strlcpy(ir->c.name, "Leadtek IR", I2C_NAME_SIZE);
-			ir->l.code_length = 8;
-			ir->l.add_to_buf = add_to_buf_pvr2000;
-		} else { /* bt8xx or cx2341x */
+		if (adap->id == I2C_HW_B_BT848 ||
+		    adap->id == I2C_HW_B_CX2341X) {
 			strlcpy(ir->c.name, "Hauppauge IR", I2C_NAME_SIZE);
 			ir->l.code_length = 13;
 			ir->l.add_to_buf = add_to_buf_haup;
+		} else { /* I2C_HW_B_CX2388x */
+			strlcpy(ir->c.name, "Leadtek IR", I2C_NAME_SIZE);
+			ir->l.code_length = 8;
+			ir->l.add_to_buf = add_to_buf_pvr2000;
 		}
 		break;
 	case 0x30:

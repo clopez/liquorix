@@ -26,7 +26,7 @@
 #include <linux/pnp.h>
 #include <linux/io.h>
 
-#include <linux/lirc.h>
+#include "lirc.h"
 #include "lirc_dev.h"
 
 #define LIRC_DRIVER_NAME "lirc_ite8709"
@@ -522,15 +522,18 @@ static struct pnp_driver ite8709_pnp_driver = {
 	.id_table       = pnp_dev_table,
 };
 
-int init_module(void)
+static int __init ite8709_pnp_init(void)
 {
 	return pnp_register_driver(&ite8709_pnp_driver);
 }
 
-void cleanup_module(void)
+static void __exit ite8709_pnp_exit(void)
 {
 	pnp_unregister_driver(&ite8709_pnp_driver);
 }
+
+module_init(ite8709_pnp_init);
+module_exit(ite8709_pnp_exit);
 
 MODULE_DESCRIPTION("LIRC driver for ITE8709 CIR port");
 MODULE_AUTHOR("Grégory Lardière");

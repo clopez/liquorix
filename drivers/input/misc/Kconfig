@@ -390,16 +390,4 @@ config INPUT_PCAP
 	  To compile this driver as a module, choose M here: the
 	  module will be called pcap_keys.
 
-config INPUT_IMON
-	tristate "SoundGraph iMON Receiver and Display"
-	depends on USB_ARCH_HAS_HCD
-	select USB
-	select INPUT_SPARSEKMAP
-	help
-	  Say Y here if you want to use a SoundGraph iMON (aka Antec Veris)
-	  IR Receiver and/or LCD/VFD/VGA display.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called imon.
-
 endif

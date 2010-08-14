@@ -510,8 +510,7 @@ static int ene_probe(struct pnp_dev *pnp_dev,
 		goto err5;
 
 	/* validate resources */
-	if (!pnp_port_valid(pnp_dev, 0) ||
-	    pnp_port_len(pnp_dev, 0) < ENE_MAX_IO)
+	if (!pnp_port_valid(pnp_dev, 0) || pnp_port_len(pnp_dev, 0) < ENE_MAX_IO)
 		goto err6;
 
 	if (!pnp_irq_valid(pnp_dev, 0))

@@ -80,7 +80,7 @@
 #define UART_IE_IXP42X_UUE   0x40 /* IXP42X UART Unit enable */
 #define UART_IE_IXP42X_RTOIE 0x10 /* IXP42X Receiver Data Timeout int.enable */
 
-#include <linux/lirc.h>
+#include "lirc.h"
 #include "lirc_dev.h"
 
 #define LIRC_DRIVER_NAME "lirc_serial"
@@ -468,7 +468,7 @@ static long send_pulse_irdeo(unsigned long length)
 	if (i == 0)
 		ret = (-rawbits) * 10000 / 1152;
 	else
-		ret = (3 - i) * 3 * 10000 / 1152 + (-rawbits) * 10000 / 1152;
+		ret = (3 - i) * 3 *10000 / 1152 + (-rawbits) * 10000 / 1152;
 
 	return ret;
 }
@@ -1237,7 +1237,6 @@ static int __init lirc_serial_init_module(void)
 	if (result < 0)
 		goto exit_serial_exit;
 	driver.features = hardware[type].features;
-	driver.dev = &lirc_serial_dev->dev;
 	driver.minor = lirc_register_driver(&driver);
 	if (driver.minor < 0) {
 		printk(KERN_ERR  LIRC_DRIVER_NAME
