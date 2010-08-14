@@ -63,7 +63,7 @@
 
 #include <linux/timer.h>
 
-#include <linux/lirc.h>
+#include "lirc.h"
 #include "lirc_dev.h"
 
 /* SECTION: Definitions */

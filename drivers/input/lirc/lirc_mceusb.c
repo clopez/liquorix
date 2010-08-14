@@ -48,7 +48,7 @@
 #include <linux/wait.h>
 #include <linux/time.h>
 
-#include <linux/lirc.h>
+#include "lirc.h"
 #include "lirc_dev.h"
 
 #define DRIVER_VERSION	"1.90"
@@ -114,8 +114,6 @@ static int debug;
 #define VENDOR_WISTRON		0x0fb8
 #define VENDOR_COMPRO		0x185b
 #define VENDOR_NORTHSTAR	0x04eb
-#define VENDOR_REALTEK		0x0bda
-#define VENDOR_TIVO		0x105a
 
 static struct usb_device_id mceusb_dev_table[] = {
 	/* Original Microsoft MCE IR Transceiver (often HP-branded) */
@@ -132,8 +130,6 @@ static struct usb_device_id mceusb_dev_table[] = {
 	{ USB_DEVICE(VENDOR_PHILIPS, 0x0613) },
 	/* Philips eHome Infrared Transceiver */
 	{ USB_DEVICE(VENDOR_PHILIPS, 0x0815) },
-	/* Realtek MCE IR Receiver */
-	{ USB_DEVICE(VENDOR_REALTEK, 0x0161) },
 	/* SMK/Toshiba G83C0004D410 */
 	{ USB_DEVICE(VENDOR_SMK, 0x031d) },
 	/* SMK eHome Infrared Transceiver (Sony VAIO) */
@@ -200,8 +196,6 @@ static struct usb_device_id mceusb_dev_table[] = {
 	{ USB_DEVICE(VENDOR_COMPRO, 0x3082) },
 	/* Northstar Systems, Inc. eHome Infrared Transceiver */
 	{ USB_DEVICE(VENDOR_NORTHSTAR, 0xe004) },
-	/* TiVo PC IR Receiver */
-	{ USB_DEVICE(VENDOR_TIVO, 0x2000) },
 	/* Terminating entry */
 	{ }
 };
@@ -218,7 +212,6 @@ static struct usb_device_id microsoft_gen1_list[] = {
 
 static struct usb_device_id transmitter_mask_list[] = {
 	{ USB_DEVICE(VENDOR_MICROSOFT, 0x006d) },
-	{ USB_DEVICE(VENDOR_PHILIPS, 0x060c) },
 	{ USB_DEVICE(VENDOR_SMK, 0x031d) },
 	{ USB_DEVICE(VENDOR_SMK, 0x0322) },
 	{ USB_DEVICE(VENDOR_SMK, 0x0334) },
@@ -267,7 +260,7 @@ struct mceusb_dev {
 	int send_flags;
 	wait_queue_head_t wait_out;
 
-	struct mutex dev_lock;
+	struct mutex lock;
 };
 
 /* init strings */
@@ -330,7 +323,7 @@ static void request_packet_async(struct mceusb_dev *ir,
 		if (unlikely(!async_urb))
 			return;
 
-		async_buf = kzalloc(size, GFP_KERNEL);
+		async_buf = kmalloc(size, GFP_KERNEL);
 		if (!async_buf) {
 			usb_free_urb(async_urb);
 			return;
@@ -448,9 +441,9 @@ static void mceusb_ir_close(void *data)
 	dev_dbg(ir->d->dev, "mceusb IR device closed\n");
 
 	if (ir->flags.connected) {
-		mutex_lock(&ir->dev_lock);
+		mutex_lock(&ir->lock);
 		ir->flags.connected = 0;
-		mutex_unlock(&ir->dev_lock);
+		mutex_unlock(&ir->lock);
 	}
 }
 
@@ -977,27 +970,39 @@ static int mceusb_dev_probe(struct usb_interface *intf,
 
 	mem_failure = 0;
 	ir = kzalloc(sizeof(struct mceusb_dev), GFP_KERNEL);
-	if (!ir)
-		goto mem_alloc_fail;
+	if (!ir) {
+		mem_failure = 1;
+		goto mem_failure_switch;
+	}
 
 	driver = kzalloc(sizeof(struct lirc_driver), GFP_KERNEL);
-	if (!driver)
-		goto mem_alloc_fail;
+	if (!driver) {
+		mem_failure = 2;
+		goto mem_failure_switch;
+	}
 
-	rbuf = kzalloc(sizeof(struct lirc_buffer), GFP_KERNEL);
-	if (!rbuf)
-		goto mem_alloc_fail;
+	rbuf = kmalloc(sizeof(struct lirc_buffer), GFP_KERNEL);
+	if (!rbuf) {
+		mem_failure = 3;
+		goto mem_failure_switch;
+	}
 
-	if (lirc_buffer_init(rbuf, sizeof(int), LIRCBUF_SIZE))
-		goto mem_alloc_fail;
+	if (lirc_buffer_init(rbuf, sizeof(int), LIRCBUF_SIZE)) {
+		mem_failure = 4;
+		goto mem_failure_switch;
+	}
 
-	ir->buf_in = usb_buffer_alloc(dev, maxp, GFP_ATOMIC, &ir->dma_in);
-	if (!ir->buf_in)
-		goto buf_in_alloc_fail;
+	ir->buf_in = usb_alloc_coherent(dev, maxp, GFP_ATOMIC, &ir->dma_in);
+	if (!ir->buf_in) {
+		mem_failure = 5;
+		goto mem_failure_switch;
+	}
 
 	ir->urb_in = usb_alloc_urb(0, GFP_KERNEL);
-	if (!ir->urb_in)
-		goto urb_in_alloc_fail;
+	if (!ir->urb_in) {
+		mem_failure = 7;
+		goto mem_failure_switch;
+	}
 
 	strcpy(driver->name, DRIVER_NAME);
 	driver->minor = -1;
@@ -1014,12 +1019,32 @@ static int mceusb_dev_probe(struct usb_interface *intf,
 	driver->dev   = &intf->dev;
 	driver->owner = THIS_MODULE;
 
-	mutex_init(&ir->dev_lock);
+	mutex_init(&ir->lock);
 	init_waitqueue_head(&ir->wait_out);
 
 	minor = lirc_register_driver(driver);
 	if (minor < 0)
-		goto lirc_register_fail;
+		mem_failure = 9;
+
+mem_failure_switch:
+
+	switch (mem_failure) {
+	case 9:
+		usb_free_urb(ir->urb_in);
+	case 7:
+		usb_free_coherent(dev, maxp, ir->buf_in, ir->dma_in);
+	case 5:
+		lirc_buffer_free(rbuf);
+	case 4:
+		kfree(rbuf);
+	case 3:
+		kfree(driver);
+	case 2:
+		kfree(ir);
+	case 1:
+		dev_info(&intf->dev, "out of memory (code=%d)\n", mem_failure);
+		return -ENOMEM;
+	}
 
 	driver->minor = minor;
 	ir->d = driver;
@@ -1117,21 +1142,6 @@ static int mceusb_dev_probe(struct usb_interface *intf,
 		 dev->bus->busnum, devnum);
 
 	return 0;
-
-	/* Error-handling path */
-lirc_register_fail:
-	usb_free_urb(ir->urb_in);
-urb_in_alloc_fail:
-	usb_buffer_free(dev, maxp, ir->buf_in, ir->dma_in);
-buf_in_alloc_fail:
-	lirc_buffer_free(rbuf);
-mem_alloc_fail:
-	kfree(rbuf);
-	kfree(driver);
-	kfree(ir);
-	dev_info(&intf->dev, "out of memory (code=%d)\n", mem_failure);
-
-	return -ENOMEM;
 }
 
 
@@ -1148,11 +1158,11 @@ static void mceusb_dev_disconnect(struct usb_interface *intf)
 	ir->usbdev = NULL;
 	wake_up_all(&ir->wait_out);
 
-	mutex_lock(&ir->dev_lock);
+	mutex_lock(&ir->lock);
 	usb_kill_urb(ir->urb_in);
 	usb_free_urb(ir->urb_in);
-	usb_buffer_free(dev, ir->len_in, ir->buf_in, ir->dma_in);
-	mutex_unlock(&ir->dev_lock);
+	usb_free_coherent(dev, ir->len_in, ir->buf_in, ir->dma_in);
+	mutex_unlock(&ir->lock);
 
 	unregister_from_lirc(ir);
 }

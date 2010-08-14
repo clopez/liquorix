@@ -38,7 +38,7 @@
 #include <linux/slab.h>
 #include <linux/usb.h>
 
-#include <linux/lirc.h>
+#include "lirc.h"
 #include "lirc_dev.h"
 
 MODULE_DESCRIPTION("TechnoTrend USB IR device driver for LIRC");

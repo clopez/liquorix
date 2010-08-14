@@ -19,7 +19,7 @@
  * USA
  */
 
-#include <linux/lirc.h>
+#include "lirc.h"
 #include "lirc_dev.h"
 
 /* hardware address */

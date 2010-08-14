@@ -28,9 +28,6 @@
  * 2005/06/05 Andrew Calkin implemented support for Asus Digimatrix,
  *   based on work of the following member of the Outertrack Digimatrix
  *   Forum: Art103 <r_tay@hotmail.com>
- * 2009/12/24 James Edwards <jimbo-lirc@edwardsclan.net> implemeted support
- *   for ITE8704/ITE8718, on my machine, the DSDT reports 8704, but the
- *   chip identifies as 18.
  */
 
 #include <linux/module.h>
@@ -56,7 +53,7 @@
 
 #include <linux/timer.h>
 
-#include <linux/lirc.h>
+#include "lirc.h"
 #include "lirc_dev.h"
 
 #include "lirc_it87.h"
@@ -148,12 +145,10 @@ static void drop_port(void);
 static int lirc_open(struct inode *inode, struct file *file)
 {
 	spin_lock(&dev_lock);
-#ifdef CONFIG_MODULE_UNLOAD
 	if (module_refcount(THIS_MODULE)) {
 		spin_unlock(&dev_lock);
 		return -EBUSY;
 	}
-#endif
 	spin_unlock(&dev_lock);
 	return 0;
 }
@@ -365,6 +360,7 @@ static struct lirc_driver driver = {
 };
 
 
+#ifdef MODULE
 static int init_chrdev(void)
 {
 	driver.minor = lirc_register_driver(&driver);
@@ -381,6 +377,7 @@ static void drop_chrdev(void)
 {
 	lirc_unregister_driver(driver.minor);
 }
+#endif
 
 
 /* SECTION: Hardware */
@@ -519,7 +516,7 @@ static irqreturn_t it87_interrupt(int irq, void *dev_id)
 				del_timer(&timerlist);
 				data = inb(io + IT87_CIR_DR);
 
-				dprintk("data=%02x\n", data);
+				dprintk("data=%.2x\n", data);
 				do_gettimeofday(&curr_tv);
 				deltv = delta(&last_tv, &curr_tv);
 				deltintrtv = delta(&last_intr_tv, &curr_tv);
@@ -794,22 +791,20 @@ static int init_port(void)
 		return retval;
 	}
 	it87_chipid = it87_read(IT87_CHIP_ID2);
-	if ((it87_chipid != 0x05) &&
-		(it87_chipid != 0x12) &&
-		(it87_chipid != 0x18) &&
+	if ((it87_chipid != 0x12) &&
+		(it87_chipid != 0x05) &&
 		(it87_chipid != 0x20)) {
 		printk(KERN_INFO LIRC_DRIVER_NAME
-		       ": no IT8704/05/12/18/20 found (claimed IT87%02x), "
-		       "exiting..\n", it87_chipid);
+		       ": no IT8705/12/20 found, exiting..\n");
 		retval = -ENXIO;
 		return retval;
 	}
 	printk(KERN_INFO LIRC_DRIVER_NAME
-	       ": found IT87%02x.\n",
+	       ": found IT87%.2x.\n",
 	       it87_chipid);
 
 	/* get I/O-Port and IRQ */
-	if (it87_chipid == 0x12 || it87_chipid == 0x18)
+	if (it87_chipid == 0x12)
 		ldn = IT8712_CIR_LDN;
 	else
 		ldn = IT8705_CIR_LDN;
@@ -950,7 +945,7 @@ static void __exit lirc_it87_exit(void)
 module_init(lirc_it87_init);
 module_exit(lirc_it87_exit);
 
-MODULE_DESCRIPTION("LIRC driver for ITE IT8704/05/12/18/20 CIR port");
+MODULE_DESCRIPTION("LIRC driver for ITE IT8712/IT8705 CIR port");
 MODULE_AUTHOR("Hans-Gunter Lutke Uphues");
 MODULE_LICENSE("GPL");
 

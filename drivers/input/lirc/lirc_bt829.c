@@ -116,45 +116,6 @@ static void atir_set_use_dec(void *data)
 	dprintk("driver is closed\n");
 }
 
-int init_module(void)
-{
-	struct pci_dev *pdev;
-
-	pdev = do_pci_probe();
-	if (pdev == NULL)
-		return 1;
-
-	if (!atir_init_start())
-		return 1;
-
-	strcpy(atir_driver.name, "ATIR");
-	atir_driver.minor       = -1;
-	atir_driver.code_length = 8;
-	atir_driver.sample_rate = 10;
-	atir_driver.data        = 0;
-	atir_driver.add_to_buf  = atir_add_to_buf;
-	atir_driver.set_use_inc = atir_set_use_inc;
-	atir_driver.set_use_dec = atir_set_use_dec;
-	atir_driver.dev         = &pdev->dev;
-	atir_driver.owner       = THIS_MODULE;
-
-	atir_minor = lirc_register_driver(&atir_driver);
-	if (atir_minor < 0) {
-		printk(KERN_ERR DRIVER_NAME ": failed to register driver!\n");
-		return atir_minor;
-	}
-	dprintk("driver is registered on minor %d\n", atir_minor);
-
-	return 0;
-}
-
-
-void cleanup_module(void)
-{
-	lirc_unregister_driver(atir_minor);
-}
-
-
 static int atir_init_start(void)
 {
 	pci_addr_lin = ioremap(pci_addr_phys + DATA_PCI_OFF, 0x400);
@@ -374,6 +335,46 @@ static void write_index(unsigned char index, unsigned int reg_val)
 	addr = pci_addr_lin + ((index & 0xFF) << 2);
 	writel(reg_val, addr);
 }
+
+static int __init atir_init(void)
+{
+	struct pci_dev *pdev;
+
+	pdev = do_pci_probe();
+	if (pdev == NULL)
+		return 1;
+
+	if (!atir_init_start())
+		return 1;
+
+	strcpy(atir_driver.name, "ATIR");
+	atir_driver.minor       = -1;
+	atir_driver.code_length = 8;
+	atir_driver.sample_rate = 10;
+	atir_driver.data        = 0;
+	atir_driver.add_to_buf  = atir_add_to_buf;
+	atir_driver.set_use_inc = atir_set_use_inc;
+	atir_driver.set_use_dec = atir_set_use_dec;
+	atir_driver.dev         = &pdev->dev;
+	atir_driver.owner       = THIS_MODULE;
+
+	atir_minor = lirc_register_driver(&atir_driver);
+	if (atir_minor < 0) {
+		printk(KERN_ERR DRIVER_NAME ": failed to register driver!\n");
+		return atir_minor;
+	}
+	dprintk("driver is registered on minor %d\n", atir_minor);
+
+	return 0;
+}
+
+static void __exit atir_exit(void)
+{
+	lirc_unregister_driver(atir_minor);
+}
+
+module_init(atir_init);
+module_exit(atir_exit);
 
 MODULE_AUTHOR("Froenchenko Leonid");
 MODULE_DESCRIPTION("IR remote driver for bt829 based TV cards");

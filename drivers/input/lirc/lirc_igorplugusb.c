@@ -50,7 +50,7 @@
 #include <linux/smp_lock.h>
 #include <linux/time.h>
 
-#include <linux/lirc.h>
+#include "lirc.h"
 #include "lirc_dev.h"
 
 
@@ -407,7 +407,7 @@ static int usb_remote_probe(struct usb_interface *intf,
 		goto mem_failure_switch;
 	}
 
-	ir->buf_in = usb_buffer_alloc(dev,
+	ir->buf_in = usb_alloc_coherent(dev,
 			      DEVICE_BUFLEN+DEVICE_HEADERLEN,
 			      GFP_ATOMIC, &ir->dma_in);
 	if (!ir->buf_in) {
@@ -439,7 +439,7 @@ mem_failure_switch:
 
 	switch (mem_failure) {
 	case 9:
-		usb_buffer_free(dev, DEVICE_BUFLEN+DEVICE_HEADERLEN,
+		usb_free_coherent(dev, DEVICE_BUFLEN+DEVICE_HEADERLEN,
 			ir->buf_in, ir->dma_in);
 	case 3:
 		kfree(driver);
@@ -497,7 +497,7 @@ static void usb_remote_disconnect(struct usb_interface *intf)
 	ir->usbdev = NULL;
 	wake_up_all(&ir->wait_out);
 
-	usb_buffer_free(dev, ir->len_in, ir->buf_in, ir->dma_in);
+	usb_free_coherent(dev, ir->len_in, ir->buf_in, ir->dma_in);
 
 	unregister_from_lirc(ir);
 }
@@ -553,3 +553,4 @@ MODULE_DEVICE_TABLE(usb, usb_remote_id_table);
 
 module_param(sample_rate, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(sample_rate, "Sampling rate in Hz (default: 100)");
+
