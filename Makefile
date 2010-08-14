@@ -1,8 +1,13 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 35
+<<<<<<< HEAD
 EXTRAVERSION = -zen0
 NAME = Untested Master
+=======
+EXTRAVERSION = .2
+NAME = Sheep on Meth
+>>>>>>> 2.6.35-upstream-updates
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
