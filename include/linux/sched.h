@@ -1597,11 +1597,12 @@ static inline void remove_cpu(unsigned long cpu)
 {
 }
 
-/* Anyone feel like implementing this? */
+/* Anyone feel like implementing this? 
 static inline int above_background_load(void)
 {
 	return 1;
 }
+*/
 #endif /* CONFIG_SCHED_BFS */
 
 /* CFS and BFS */
