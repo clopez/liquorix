@@ -235,12 +235,11 @@ static int dazukofs_fsync(struct file *file, struct dentry *dentry,
 			  int datasync)
 {
 	struct file *lower_file = get_lower_file(file);
-	struct dentry *lower_dentry = get_lower_dentry(dentry);
 
 	if (!lower_file->f_op || !lower_file->f_op->fsync)
 		return -EINVAL;
 
-	return lower_file->f_op->fsync(lower_file, lower_dentry, datasync);
+	return lower_file->f_op->fsync(lower_file, datasync);
 }
 
 /**
