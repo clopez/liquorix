@@ -317,8 +317,6 @@ checks:
 	if (offset > si->highest_bit)
 		scan_base = offset = si->lowest_bit;
 
-	/* reuse swap entry of cache-only swap if not busy. */
-	if (si->swap_map[offset] == SWAP_HAS_CACHE) {
 	/* reuse swap entry of cache-only swap if not hibernation. */
 	if (vm_swap_full()
 		&& usage == SWAP_HAS_CACHE
