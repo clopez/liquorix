@@ -321,7 +321,7 @@ config DM_UEVENT
 
 config DM_RAID45
 	tristate "RAID 4/5 target (EXPERIMENTAL)"
-	depends on BLK_DEV_DM && EXPERIMENTAL && BROKEN
+	depends on BLK_DEV_DM && EXPERIMENTAL
 	select ASYNC_XOR
 	---help---
 	A target that supports RAID4 and RAID5 mappings.
