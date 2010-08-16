@@ -832,10 +832,12 @@ struct ext4_inode_info {
 
 	/*
 	 * Transactions that contain inode's metadata needed to complete
-	 * fsync and fdatasync, respectively.
+	 * fsync and fdatasync, respectively and barrier id when we last
+	 * wrote data to this file.
 	 */
 	tid_t i_sync_tid;
 	tid_t i_datasync_tid;
+	unsigned i_data_bid;
 };
 
 /*
