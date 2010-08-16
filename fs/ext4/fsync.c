@@ -57,6 +57,21 @@ static void ext4_sync_parent(struct inode *inode)
 	}
 }
 
+static int ext4_need_issue_data_flush(struct inode *inode)
+{
+	struct ext4_inode_info *ei = EXT4_I(inode);
+	journal_t *journal = EXT4_SB(inode->i_sb)->s_journal;
+	int comp_bid, inode_bid = ei->i_data_bid;
+
+	if (!(journal->j_flags & JBD2_BARRIER))
+		return 0;
+	comp_bid = atomic_read(&inode->i_sb->s_bdev->bd_barriers_completed);
+	/* inode_bid < completed_bid safe against wrapping */
+	if (inode_bid - comp_bid < 0)
+		return 0;
+	return 1;
+}
+
 /*
  * akpm: A new design for ext4_sync_file().
  *
@@ -126,11 +141,11 @@ int ext4_sync_file(struct file *file, int datasync)
 		 */
 		if (ext4_should_writeback_data(inode) &&
 		    (journal->j_fs_dev != journal->j_dev) &&
-		    (journal->j_flags & JBD2_BARRIER))
+		    ext4_need_issue_data_flush(inode))
 			blkdev_issue_flush(inode->i_sb->s_bdev, GFP_KERNEL,
 					NULL, BLKDEV_IFL_WAIT);
 		ret = jbd2_log_wait_commit(journal, commit_tid);
-	} else if (journal->j_flags & JBD2_BARRIER)
+	} else if (ext4_need_issue_data_flush(inode))
 		blkdev_issue_flush(inode->i_sb->s_bdev, GFP_KERNEL, NULL,
 			BLKDEV_IFL_WAIT);
 	return ret;
