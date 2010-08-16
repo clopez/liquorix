@@ -1427,6 +1427,13 @@ void bio_endio(struct bio *bio, int error)
 	else if (!test_bit(BIO_UPTODATE, &bio->bi_flags))
 		error = -EIO;
 
+	/*
+	 * Increment even in case of error so that sent and completed
+	 * counters don't get out of sync
+	 */
+	if (bio_rw_flagged(bio, BIO_RW_BARRIER))
+		atomic_inc(&bio->bi_bdev->bd_barriers_completed);
+
 	if (bio->bi_end_io)
 		bio->bi_end_io(bio, error);
 }

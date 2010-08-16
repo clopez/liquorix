@@ -1600,6 +1600,11 @@ void submit_bio(int rw, struct bio *bio)
 				bdevname(bio->bi_bdev, b));
 		}
 	}
+	if (rw & (1 << BIO_RW_BARRIER)) {
+		atomic_inc(&bio->bi_bdev->bd_barriers_sent);
+		/* Make sure counter update is seen before IO happens */
+		smp_mb__after_atomic_inc();
+	}
 
 	generic_make_request(bio);
 }
