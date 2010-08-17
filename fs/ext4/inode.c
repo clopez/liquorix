@@ -2758,10 +2758,6 @@ static int ext4_writepage(struct page *page,
 	} else
 		ret = block_write_full_page(page, noalloc_get_block_write,
 					    wbc);
-	/* Make sure we read current value of bd_barriers_sent */
-	smp_rmb();
-	EXT4_I(inode)->i_data_bid =
-		atomic_read(&inode->i_sb->s_bdev->bd_barriers_sent);
 
 	return ret;
 }
