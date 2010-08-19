@@ -69,7 +69,6 @@ void device_pm_lock(void)
 {
 	mutex_lock(&dpm_list_mtx);
 }
-EXPORT_SYMBOL_GPL(device_pm_lock);
 
 /**
  * device_pm_unlock - Unlock the list of active devices used by the PM core.
@@ -78,7 +77,6 @@ void device_pm_unlock(void)
 {
 	mutex_unlock(&dpm_list_mtx);
 }
-EXPORT_SYMBOL_GPL(device_pm_unlock);
 
 /**
  * device_pm_add - Add a device to the PM core's list of active devices.
