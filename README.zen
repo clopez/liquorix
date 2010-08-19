@@ -1,3 +1,7 @@
-v2.6.35-zen0
-- This master branch has not been tested or even compiled yet. Please hold bug reports until 2.6.35-zen1 is tagged in the master.
-- Feel free to test as is, use at your own risk
+v2.6.35-zen1
+- Initial release based on 2.6.35.2 release
+- 2.6.35-ck1/bfs 323 w/ zen-tune
+- Vhba + Scholastic blue (not related, but new)
+- rt2x00 git tree merged
+- BFQ i/o scheduler
+- The usuals

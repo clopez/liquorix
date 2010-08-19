@@ -1,8 +1,8 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 35
-EXTRAVERSION = -zen0
-NAME = Untested Master
+EXTRAVERSION = -zen1
+NAME = Omgwtf Finallayz
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
