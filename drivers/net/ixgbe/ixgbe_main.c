@@ -6149,8 +6149,6 @@ static u16 ixgbe_select_queue(struct net_device *dev, struct sk_buff *skb)
 	struct ixgbe_adapter *adapter = netdev_priv(dev);
 	int txq = smp_processor_id();
 
-#ifdef CONFIG_IXGBE_DCB
-#endif
 #ifdef IXGBE_FCOE
 	if ((skb->protocol == htons(ETH_P_FCOE)) ||
 	    (skb->protocol == htons(ETH_P_FIP))) {
@@ -6158,12 +6156,15 @@ static u16 ixgbe_select_queue(struct net_device *dev, struct sk_buff *skb)
 			txq &= (adapter->ring_feature[RING_F_FCOE].indices - 1);
 			txq += adapter->ring_feature[RING_F_FCOE].mask;
 			return txq;
+#ifdef CONFIG_IXGBE_DCB
 		} else if (adapter->flags & IXGBE_FLAG_DCB_ENABLED) {
 			txq = adapter->fcoe.up;
 			return txq;
+#endif
 		}
 	}
 #endif
+
 
 	if (adapter->flags & IXGBE_FLAG_FDIR_HASH_CAPABLE) {
 		while (unlikely(txq >= dev->real_num_tx_queues))
