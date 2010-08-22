@@ -6219,12 +6219,12 @@ static netdev_tx_t ixgbe_xmit_frame(struct sk_buff *skb,
 	if (adapter->flags & IXGBE_FLAG_FCOE_ENABLED &&
 	    (skb->protocol == htons(ETH_P_FCOE) ||
 	     skb->protocol == htons(ETH_P_FIP))) {
+#ifdef CONFIG_IXGBE_DCB
+		if (adapter->flags & IXGBE_FLAG_DCB_ENABLED) {
 		tx_flags &= ~(IXGBE_TX_FLAGS_VLAN_PRIO_MASK
 			      << IXGBE_TX_FLAGS_VLAN_SHIFT);
-#ifdef CONFIG_IXGBE_DCB
 		tx_flags |= ((adapter->fcoe.up << 13)
 			      << IXGBE_TX_FLAGS_VLAN_SHIFT);
-#endif
 		/* flag for FCoE offloads */
 		if (skb->protocol == htons(ETH_P_FCOE))
 			tx_flags |= IXGBE_TX_FLAGS_FCOE;
