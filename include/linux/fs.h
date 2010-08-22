@@ -661,10 +661,6 @@ struct block_device {
 	void *			bd_claiming;
 	void *			bd_holder;
 	int			bd_holders;
-	/* Incremented each time before we send a barrier */
-	atomic_t		bd_barriers_sent;
-	/* Incremented each time after a barrier request completes */
-	atomic_t		bd_barriers_completed;
 #ifdef CONFIG_SYSFS
 	struct list_head	bd_holder_list;
 #endif
