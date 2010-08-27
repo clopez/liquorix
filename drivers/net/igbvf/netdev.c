@@ -2753,7 +2753,7 @@ static int __devinit igbvf_probe(struct pci_dev *pdev,
 		dev_info(&pdev->dev,
 			 "PF still in reset state, assigning new address."
 			 " Is the PF interface up?\n");
-		dev_hw_addr_random(adapter->netdev, hw->mac.addr);
+		random_ether_addr(hw->mac.addr);
 	} else {
 		err = hw->mac.ops.read_mac_addr(hw);
 		if (err) {

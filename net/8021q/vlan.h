@@ -2,7 +2,6 @@
 #define __BEN_VLAN_802_1Q_INC__
 
 #include <linux/if_vlan.h>
-#include <linux/u64_stats_sync.h>
 
 
 /**
@@ -22,16 +21,14 @@ struct vlan_priority_tci_mapping {
  *	struct vlan_rx_stats - VLAN percpu rx stats
  *	@rx_packets: number of received packets
  *	@rx_bytes: number of received bytes
- *	@rx_multicast: number of received multicast packets
- *	@syncp: synchronization point for 64bit counters
+ *	@multicast: number of received multicast packets
  *	@rx_errors: number of errors
  */
 struct vlan_rx_stats {
-	u64			rx_packets;
-	u64			rx_bytes;
-	u64			rx_multicast;
-	struct u64_stats_sync	syncp;
-	unsigned long		rx_errors;
+	unsigned long rx_packets;
+	unsigned long rx_bytes;
+	unsigned long multicast;
+	unsigned long rx_errors;
 };
 
 /**

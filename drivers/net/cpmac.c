@@ -846,8 +846,11 @@ static int cpmac_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		return -EINVAL;
 	if (!priv->phy)
 		return -EINVAL;
+	if ((cmd == SIOCGMIIPHY) || (cmd == SIOCGMIIREG) ||
+	    (cmd == SIOCSMIIREG))
+		return phy_mii_ioctl(priv->phy, if_mii(ifr), cmd);
 
-	return phy_mii_ioctl(priv->phy, ifr, cmd);
+	return -EOPNOTSUPP;
 }
 
 static int cpmac_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
@@ -961,7 +964,7 @@ static int cpmac_open(struct net_device *dev)
 	struct sk_buff *skb;
 
 	mem = platform_get_resource_byname(priv->pdev, IORESOURCE_MEM, "regs");
-	if (!request_mem_region(mem->start, resource_size(mem), dev->name)) {
+	if (!request_mem_region(mem->start, mem->end - mem->start, dev->name)) {
 		if (netif_msg_drv(priv))
 			printk(KERN_ERR "%s: failed to request registers\n",
 			       dev->name);
@@ -969,7 +972,7 @@ static int cpmac_open(struct net_device *dev)
 		goto fail_reserve;
 	}
 
-	priv->regs = ioremap(mem->start, resource_size(mem));
+	priv->regs = ioremap(mem->start, mem->end - mem->start);
 	if (!priv->regs) {
 		if (netif_msg_drv(priv))
 			printk(KERN_ERR "%s: failed to remap registers\n",
@@ -1046,7 +1049,7 @@ fail_alloc:
 	iounmap(priv->regs);
 
 fail_remap:
-	release_mem_region(mem->start, resource_size(mem));
+	release_mem_region(mem->start, mem->end - mem->start);
 
 fail_reserve:
 	return res;
@@ -1074,7 +1077,7 @@ static int cpmac_stop(struct net_device *dev)
 	free_irq(dev->irq, dev);
 	iounmap(priv->regs);
 	mem = platform_get_resource_byname(priv->pdev, IORESOURCE_MEM, "regs");
-	release_mem_region(mem->start, resource_size(mem));
+	release_mem_region(mem->start, mem->end - mem->start);
 	priv->rx_head = &priv->desc_ring[CPMAC_QUEUES];
 	for (i = 0; i < priv->ring_size; i++) {
 		if (priv->rx_head[i].skb) {

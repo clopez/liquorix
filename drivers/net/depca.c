@@ -2061,35 +2061,18 @@ static int depca_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 
 static int __init depca_module_init (void)
 {
-	int err = 0;
+        int err = 0;
 
 #ifdef CONFIG_MCA
-	err = mca_register_driver(&depca_mca_driver);
-	if (err)
-		goto err;
+        err = mca_register_driver (&depca_mca_driver);
 #endif
 #ifdef CONFIG_EISA
-	err = eisa_driver_register(&depca_eisa_driver);
-	if (err)
-		goto err_mca;
+        err |= eisa_driver_register (&depca_eisa_driver);
 #endif
-	err = platform_driver_register(&depca_isa_driver);
-	if (err)
-		goto err_eisa;
+	err |= platform_driver_register (&depca_isa_driver);
+	depca_platform_probe ();
 
-	depca_platform_probe();
-	return 0;
-
-err_eisa:
-#ifdef CONFIG_EISA
-	eisa_driver_unregister(&depca_eisa_driver);
-err_mca:
-#endif
-#ifdef CONFIG_MCA
-	mca_unregister_driver(&depca_mca_driver);
-err:
-#endif
-	return err;
+        return err;
 }
 
 static void __exit depca_module_exit (void)

@@ -50,7 +50,9 @@
 struct fib_nh;
 struct inet_peer;
 struct rtable {
-	struct dst_entry	dst;
+	union {
+		struct dst_entry	dst;
+	} u;
 
 	/* Cache lookup keys */
 	struct flowi		fl;
@@ -142,7 +144,7 @@ extern void fib_add_ifaddr(struct in_ifaddr *);
 static inline void ip_rt_put(struct rtable * rt)
 {
 	if (rt)
-		dst_release(&rt->dst);
+		dst_release(&rt->u.dst);
 }
 
 #define IPTOS_RT_MASK	(IPTOS_TOS_MASK & ~3)

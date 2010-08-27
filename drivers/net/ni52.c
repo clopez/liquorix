@@ -185,6 +185,7 @@ static void    ni52_xmt_int(struct net_device *dev);
 static void    ni52_rnr_int(struct net_device *dev);
 
 struct priv {
+	struct net_device_stats stats;
 	char __iomem *base;
 	char __iomem *mapped;
 	char __iomem *memtop;
@@ -971,10 +972,10 @@ static void ni52_rcv_int(struct net_device *dev)
 					memcpy_fromio(skb->data, p->base + readl(&rbd->buffer), totlen);
 					skb->protocol = eth_type_trans(skb, dev);
 					netif_rx(skb);
-					dev->stats.rx_packets++;
-					dev->stats.rx_bytes += totlen;
+					p->stats.rx_packets++;
+					p->stats.rx_bytes += totlen;
 				} else
-					dev->stats.rx_dropped++;
+					p->stats.rx_dropped++;
 			} else {
 				int rstat;
 				 /* free all RBD's until RBD_LAST is set */
@@ -992,12 +993,12 @@ static void ni52_rcv_int(struct net_device *dev)
 				writew(0, &rbd->status);
 				printk(KERN_ERR "%s: received oversized frame! length: %d\n",
 					dev->name, totlen);
-				dev->stats.rx_dropped++;
+				p->stats.rx_dropped++;
 			 }
 		} else {/* frame !(ok), only with 'save-bad-frames' */
 			printk(KERN_ERR "%s: oops! rfd-error-status: %04x\n",
 				dev->name, status);
-			dev->stats.rx_errors++;
+			p->stats.rx_errors++;
 		}
 		writeb(0, &p->rfd_top->stat_high);
 		writeb(RFD_SUSP, &p->rfd_top->last); /* maybe exchange by RFD_LAST */
@@ -1042,7 +1043,7 @@ static void ni52_rnr_int(struct net_device *dev)
 {
 	struct priv *p = netdev_priv(dev);
 
-	dev->stats.rx_errors++;
+	p->stats.rx_errors++;
 
 	wait_for_scb_cmd(dev);		/* wait for the last cmd, WAIT_4_FULLSTAT?? */
 	writeb(RUC_ABORT, &p->scb->cmd_ruc); /* usually the RU is in the 'no resource'-state .. abort it now. */
@@ -1075,29 +1076,29 @@ static void ni52_xmt_int(struct net_device *dev)
 		printk(KERN_ERR "%s: strange .. xmit-int without a 'COMPLETE'\n", dev->name);
 
 	if (status & STAT_OK) {
-		dev->stats.tx_packets++;
-		dev->stats.collisions += (status & TCMD_MAXCOLLMASK);
+		p->stats.tx_packets++;
+		p->stats.collisions += (status & TCMD_MAXCOLLMASK);
 	} else {
-		dev->stats.tx_errors++;
+		p->stats.tx_errors++;
 		if (status & TCMD_LATECOLL) {
 			printk(KERN_ERR "%s: late collision detected.\n",
 				dev->name);
-			dev->stats.collisions++;
+			p->stats.collisions++;
 		} else if (status & TCMD_NOCARRIER) {
-			dev->stats.tx_carrier_errors++;
+			p->stats.tx_carrier_errors++;
 			printk(KERN_ERR "%s: no carrier detected.\n",
 				dev->name);
 		} else if (status & TCMD_LOSTCTS)
 			printk(KERN_ERR "%s: loss of CTS detected.\n",
 				dev->name);
 		else if (status & TCMD_UNDERRUN) {
-			dev->stats.tx_fifo_errors++;
+			p->stats.tx_fifo_errors++;
 			printk(KERN_ERR "%s: DMA underrun detected.\n",
 				dev->name);
 		} else if (status & TCMD_MAXCOLL) {
 			printk(KERN_ERR "%s: Max. collisions exceeded.\n",
 				dev->name);
-			dev->stats.collisions += 16;
+			p->stats.collisions += 16;
 		}
 	}
 #if (NUM_XMIT_BUFFS > 1)
@@ -1285,12 +1286,12 @@ static struct net_device_stats *ni52_get_stats(struct net_device *dev)
 	ovrn = readw(&p->scb->ovrn_errs);
 	writew(0, &p->scb->ovrn_errs);
 
-	dev->stats.rx_crc_errors += crc;
-	dev->stats.rx_fifo_errors += ovrn;
-	dev->stats.rx_frame_errors += aln;
-	dev->stats.rx_dropped += rsc;
+	p->stats.rx_crc_errors += crc;
+	p->stats.rx_fifo_errors += ovrn;
+	p->stats.rx_frame_errors += aln;
+	p->stats.rx_dropped += rsc;
 
-	return &dev->stats;
+	return &p->stats;
 }
 
 /********************************************************

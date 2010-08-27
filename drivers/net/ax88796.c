@@ -481,10 +481,8 @@ static int ax_open(struct net_device *dev)
 		return ret;
 
 	ret = ax_ei_open(dev);
-	if (ret) {
-		free_irq(dev->irq, dev);
+	if (ret)
 		return ret;
-	}
 
 	/* turn the phy on (if turned off) */
 

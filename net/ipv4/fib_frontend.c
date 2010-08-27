@@ -175,7 +175,6 @@ out:
 	fib_res_put(&res);
 	return dev;
 }
-EXPORT_SYMBOL(ip_dev_find);
 
 /*
  * Find address type as if only "dev" was present in the system. If
@@ -215,14 +214,12 @@ unsigned int inet_addr_type(struct net *net, __be32 addr)
 {
 	return __inet_dev_addr_type(net, NULL, addr);
 }
-EXPORT_SYMBOL(inet_addr_type);
 
 unsigned int inet_dev_addr_type(struct net *net, const struct net_device *dev,
 				__be32 addr)
 {
        return __inet_dev_addr_type(net, dev, addr);
 }
-EXPORT_SYMBOL(inet_dev_addr_type);
 
 /* Given (packet source, input interface) and optional (dst, oif, tos):
    - (main) check, that source is valid i.e. not broadcast or our local
@@ -287,7 +284,7 @@ int fib_validate_source(__be32 src, __be32 dst, u8 tos, int oif,
 	if (no_addr)
 		goto last_resort;
 	if (rpf == 1)
-		goto e_rpf;
+		goto e_inval;
 	fl.oif = dev->ifindex;
 
 	ret = 0;
@@ -302,7 +299,7 @@ int fib_validate_source(__be32 src, __be32 dst, u8 tos, int oif,
 
 last_resort:
 	if (rpf)
-		goto e_rpf;
+		goto e_inval;
 	*spec_dst = inet_select_addr(dev, 0, RT_SCOPE_UNIVERSE);
 	*itag = 0;
 	return 0;
@@ -311,8 +308,6 @@ e_inval_res:
 	fib_res_put(&res);
 e_inval:
 	return -EINVAL;
-e_rpf:
-	return -EXDEV;
 }
 
 static inline __be32 sk_extract_addr(struct sockaddr *addr)
@@ -1080,3 +1075,7 @@ void __init ip_fib_init(void)
 
 	fib_hash_init();
 }
+
+EXPORT_SYMBOL(inet_addr_type);
+EXPORT_SYMBOL(inet_dev_addr_type);
+EXPORT_SYMBOL(ip_dev_find);

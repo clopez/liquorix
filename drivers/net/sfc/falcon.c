@@ -167,15 +167,13 @@ irqreturn_t falcon_legacy_interrupt_a1(int irq, void *dev_id)
 	 * exit without having touched the hardware.
 	 */
 	if (unlikely(EFX_OWORD_IS_ZERO(*int_ker))) {
-		netif_vdbg(efx, intr, efx->net_dev,
-			   "IRQ %d on CPU %d not for me\n", irq,
-			   raw_smp_processor_id());
+		EFX_TRACE(efx, "IRQ %d on CPU %d not for me\n", irq,
+			  raw_smp_processor_id());
 		return IRQ_NONE;
 	}
 	efx->last_irq_cpu = raw_smp_processor_id();
-	netif_vdbg(efx, intr, efx->net_dev,
-		   "IRQ %d on CPU %d status " EFX_OWORD_FMT "\n",
-		   irq, raw_smp_processor_id(), EFX_OWORD_VAL(*int_ker));
+	EFX_TRACE(efx, "IRQ %d on CPU %d status " EFX_OWORD_FMT "\n",
+		  irq, raw_smp_processor_id(), EFX_OWORD_VAL(*int_ker));
 
 	/* Determine interrupting queues, clear interrupt status
 	 * register and acknowledge the device interrupt.
@@ -241,8 +239,7 @@ static int falcon_spi_wait(struct efx_nic *efx)
 		if (!falcon_spi_poll(efx))
 			return 0;
 		if (time_after_eq(jiffies, timeout)) {
-			netif_err(efx, hw, efx->net_dev,
-				  "timed out waiting for SPI\n");
+			EFX_ERR(efx, "timed out waiting for SPI\n");
 			return -ETIMEDOUT;
 		}
 		schedule_timeout_uninterruptible(1);
@@ -336,10 +333,9 @@ falcon_spi_wait_write(struct efx_nic *efx, const struct efx_spi_device *spi)
 		if (!(status & SPI_STATUS_NRDY))
 			return 0;
 		if (time_after_eq(jiffies, timeout)) {
-			netif_err(efx, hw, efx->net_dev,
-				  "SPI write timeout on device %d"
-				  " last status=0x%02x\n",
-				  spi->device_id, status);
+			EFX_ERR(efx, "SPI write timeout on device %d"
+				" last status=0x%02x\n",
+				spi->device_id, status);
 			return -ETIMEDOUT;
 		}
 		schedule_timeout_uninterruptible(1);
@@ -473,8 +469,7 @@ static void falcon_reset_macs(struct efx_nic *efx)
 				udelay(10);
 			}
 
-			netif_err(efx, hw, efx->net_dev,
-				  "timed out waiting for XMAC core reset\n");
+			EFX_ERR(efx, "timed out waiting for XMAC core reset\n");
 		}
 	}
 
@@ -497,13 +492,12 @@ static void falcon_reset_macs(struct efx_nic *efx)
 		if (!EFX_OWORD_FIELD(reg, FRF_AB_RST_XGTX) &&
 		    !EFX_OWORD_FIELD(reg, FRF_AB_RST_XGRX) &&
 		    !EFX_OWORD_FIELD(reg, FRF_AB_RST_EM)) {
-			netif_dbg(efx, hw, efx->net_dev,
-				  "Completed MAC reset after %d loops\n",
-				  count);
+			EFX_LOG(efx, "Completed MAC reset after %d loops\n",
+				count);
 			break;
 		}
 		if (count > 20) {
-			netif_err(efx, hw, efx->net_dev, "MAC reset failed\n");
+			EFX_ERR(efx, "MAC reset failed\n");
 			break;
 		}
 		count++;
@@ -554,9 +548,7 @@ void falcon_reconfigure_mac_wrapper(struct efx_nic *efx)
 {
 	struct efx_link_state *link_state = &efx->link_state;
 	efx_oword_t reg;
-	int link_speed, isolate;
-
-	isolate = (efx->reset_pending != RESET_TYPE_NONE);
+	int link_speed;
 
 	switch (link_state->speed) {
 	case 10000: link_speed = 3; break;
@@ -578,7 +570,7 @@ void falcon_reconfigure_mac_wrapper(struct efx_nic *efx)
 	 * discarded. */
 	if (efx_nic_rev(efx) >= EFX_REV_FALCON_B0) {
 		EFX_SET_OWORD_FIELD(reg, FRF_BB_TXFIFO_DRAIN_EN,
-				    !link_state->up || isolate);
+				    !link_state->up);
 	}
 
 	efx_writeo(efx, &reg, FR_AB_MAC_CTRL);
@@ -592,7 +584,7 @@ void falcon_reconfigure_mac_wrapper(struct efx_nic *efx)
 	EFX_SET_OWORD_FIELD(reg, FRF_AZ_RX_XOFF_MAC_EN, 1);
 	/* Unisolate the MAC -> RX */
 	if (efx_nic_rev(efx) >= EFX_REV_FALCON_B0)
-		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_INGR_EN, !isolate);
+		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_INGR_EN, 1);
 	efx_writeo(efx, &reg, FR_AZ_RX_CFG);
 }
 
@@ -633,8 +625,7 @@ static void falcon_stats_complete(struct efx_nic *efx)
 		rmb(); /* read the done flag before the stats */
 		efx->mac_op->update_stats(efx);
 	} else {
-		netif_err(efx, hw, efx->net_dev,
-			  "timed out waiting for statistics\n");
+		EFX_ERR(efx, "timed out waiting for statistics\n");
 	}
 }
 
@@ -724,17 +715,16 @@ static int falcon_gmii_wait(struct efx_nic *efx)
 		if (EFX_OWORD_FIELD(md_stat, FRF_AB_MD_BSY) == 0) {
 			if (EFX_OWORD_FIELD(md_stat, FRF_AB_MD_LNFL) != 0 ||
 			    EFX_OWORD_FIELD(md_stat, FRF_AB_MD_BSERR) != 0) {
-				netif_err(efx, hw, efx->net_dev,
-					  "error from GMII access "
-					  EFX_OWORD_FMT"\n",
-					  EFX_OWORD_VAL(md_stat));
+				EFX_ERR(efx, "error from GMII access "
+					EFX_OWORD_FMT"\n",
+					EFX_OWORD_VAL(md_stat));
 				return -EIO;
 			}
 			return 0;
 		}
 		udelay(10);
 	}
-	netif_err(efx, hw, efx->net_dev, "timed out waiting for GMII\n");
+	EFX_ERR(efx, "timed out waiting for GMII\n");
 	return -ETIMEDOUT;
 }
 
@@ -746,8 +736,7 @@ static int falcon_mdio_write(struct net_device *net_dev,
 	efx_oword_t reg;
 	int rc;
 
-	netif_vdbg(efx, hw, efx->net_dev,
-		   "writing MDIO %d register %d.%d with 0x%04x\n",
+	EFX_REGDUMP(efx, "writing MDIO %d register %d.%d with 0x%04x\n",
 		    prtad, devad, addr, value);
 
 	mutex_lock(&efx->mdio_lock);
@@ -821,9 +810,8 @@ static int falcon_mdio_read(struct net_device *net_dev,
 	if (rc == 0) {
 		efx_reado(efx, &reg, FR_AB_MD_RXD);
 		rc = EFX_OWORD_FIELD(reg, FRF_AB_MD_RXD);
-		netif_vdbg(efx, hw, efx->net_dev,
-			   "read from MDIO %d register %d.%d, got %04x\n",
-			   prtad, devad, addr, rc);
+		EFX_REGDUMP(efx, "read from MDIO %d register %d.%d, got %04x\n",
+			    prtad, devad, addr, rc);
 	} else {
 		/* Abort the read operation */
 		EFX_POPULATE_OWORD_2(reg,
@@ -831,9 +819,8 @@ static int falcon_mdio_read(struct net_device *net_dev,
 				     FRF_AB_MD_GC, 1);
 		efx_writeo(efx, &reg, FR_AB_MD_CS);
 
-		netif_dbg(efx, hw, efx->net_dev,
-			  "read from MDIO %d register %d.%d, got error %d\n",
-			  prtad, devad, addr, rc);
+		EFX_LOG(efx, "read from MDIO %d register %d.%d, got error %d\n",
+			prtad, devad, addr, rc);
 	}
 
 out:
@@ -884,8 +871,7 @@ static void falcon_switch_mac(struct efx_nic *efx)
 
 	falcon_clock_mac(efx);
 
-	netif_dbg(efx, hw, efx->net_dev, "selected %cMAC\n",
-		  EFX_IS10G(efx) ? 'X' : 'G');
+	EFX_LOG(efx, "selected %cMAC\n", EFX_IS10G(efx) ? 'X' : 'G');
 	/* Not all macs support a mac-level link state */
 	efx->xmac_poll_required = false;
 	falcon_reset_macs(efx);
@@ -909,8 +895,8 @@ static int falcon_probe_port(struct efx_nic *efx)
 		efx->phy_op = &falcon_qt202x_phy_ops;
 		break;
 	default:
-		netif_err(efx, probe, efx->net_dev, "Unknown PHY type %d\n",
-			  efx->phy_type);
+		EFX_ERR(efx, "Unknown PHY type %d\n",
+			efx->phy_type);
 		return -ENODEV;
 	}
 
@@ -938,11 +924,10 @@ static int falcon_probe_port(struct efx_nic *efx)
 				  FALCON_MAC_STATS_SIZE);
 	if (rc)
 		return rc;
-	netif_dbg(efx, probe, efx->net_dev,
-		  "stats buffer at %llx (virt %p phys %llx)\n",
-		  (u64)efx->stats_buffer.dma_addr,
-		  efx->stats_buffer.addr,
-		  (u64)virt_to_phys(efx->stats_buffer.addr));
+	EFX_LOG(efx, "stats buffer at %llx (virt %p phys %llx)\n",
+		(u64)efx->stats_buffer.dma_addr,
+		efx->stats_buffer.addr,
+		(u64)virt_to_phys(efx->stats_buffer.addr));
 
 	return 0;
 }
@@ -982,8 +967,8 @@ falcon_read_nvram(struct efx_nic *efx, struct falcon_nvconfig *nvconfig_out)
 	rc = falcon_spi_read(efx, spi, 0, FALCON_NVCONFIG_END, NULL, region);
 	mutex_unlock(&efx->spi_lock);
 	if (rc) {
-		netif_err(efx, hw, efx->net_dev, "Failed to read %s\n",
-			  efx->spi_flash ? "flash" : "EEPROM");
+		EFX_ERR(efx, "Failed to read %s\n",
+			efx->spi_flash ? "flash" : "EEPROM");
 		rc = -EIO;
 		goto out;
 	}
@@ -993,13 +978,11 @@ falcon_read_nvram(struct efx_nic *efx, struct falcon_nvconfig *nvconfig_out)
 
 	rc = -EINVAL;
 	if (magic_num != FALCON_NVCONFIG_BOARD_MAGIC_NUM) {
-		netif_err(efx, hw, efx->net_dev,
-			  "NVRAM bad magic 0x%x\n", magic_num);
+		EFX_ERR(efx, "NVRAM bad magic 0x%x\n", magic_num);
 		goto out;
 	}
 	if (struct_ver < 2) {
-		netif_err(efx, hw, efx->net_dev,
-			  "NVRAM has ancient version 0x%x\n", struct_ver);
+		EFX_ERR(efx, "NVRAM has ancient version 0x%x\n", struct_ver);
 		goto out;
 	} else if (struct_ver < 4) {
 		word = &nvconfig->board_magic_num;
@@ -1012,8 +995,7 @@ falcon_read_nvram(struct efx_nic *efx, struct falcon_nvconfig *nvconfig_out)
 		csum += le16_to_cpu(*word);
 
 	if (~csum & 0xffff) {
-		netif_err(efx, hw, efx->net_dev,
-			  "NVRAM has incorrect checksum\n");
+		EFX_ERR(efx, "NVRAM has incorrect checksum\n");
 		goto out;
 	}
 
@@ -1091,25 +1073,22 @@ static int falcon_reset_hw(struct efx_nic *efx, enum reset_type method)
 	efx_oword_t glb_ctl_reg_ker;
 	int rc;
 
-	netif_dbg(efx, hw, efx->net_dev, "performing %s hardware reset\n",
-		  RESET_TYPE(method));
+	EFX_LOG(efx, "performing %s hardware reset\n", RESET_TYPE(method));
 
 	/* Initiate device reset */
 	if (method == RESET_TYPE_WORLD) {
 		rc = pci_save_state(efx->pci_dev);
 		if (rc) {
-			netif_err(efx, drv, efx->net_dev,
-				  "failed to backup PCI state of primary "
-				  "function prior to hardware reset\n");
+			EFX_ERR(efx, "failed to backup PCI state of primary "
+				"function prior to hardware reset\n");
 			goto fail1;
 		}
 		if (efx_nic_is_dual_func(efx)) {
 			rc = pci_save_state(nic_data->pci_dev2);
 			if (rc) {
-				netif_err(efx, drv, efx->net_dev,
-					  "failed to backup PCI state of "
-					  "secondary function prior to "
-					  "hardware reset\n");
+				EFX_ERR(efx, "failed to backup PCI state of "
+					"secondary function prior to "
+					"hardware reset\n");
 				goto fail2;
 			}
 		}
@@ -1134,7 +1113,7 @@ static int falcon_reset_hw(struct efx_nic *efx, enum reset_type method)
 	}
 	efx_writeo(efx, &glb_ctl_reg_ker, FR_AB_GLB_CTL);
 
-	netif_dbg(efx, hw, efx->net_dev, "waiting for hardware reset\n");
+	EFX_LOG(efx, "waiting for hardware reset\n");
 	schedule_timeout_uninterruptible(HZ / 20);
 
 	/* Restore PCI configuration if needed */
@@ -1142,32 +1121,28 @@ static int falcon_reset_hw(struct efx_nic *efx, enum reset_type method)
 		if (efx_nic_is_dual_func(efx)) {
 			rc = pci_restore_state(nic_data->pci_dev2);
 			if (rc) {
-				netif_err(efx, drv, efx->net_dev,
-					  "failed to restore PCI config for "
-					  "the secondary function\n");
+				EFX_ERR(efx, "failed to restore PCI config for "
+					"the secondary function\n");
 				goto fail3;
 			}
 		}
 		rc = pci_restore_state(efx->pci_dev);
 		if (rc) {
-			netif_err(efx, drv, efx->net_dev,
-				  "failed to restore PCI config for the "
-				  "primary function\n");
+			EFX_ERR(efx, "failed to restore PCI config for the "
+				"primary function\n");
 			goto fail4;
 		}
-		netif_dbg(efx, drv, efx->net_dev,
-			  "successfully restored PCI config\n");
+		EFX_LOG(efx, "successfully restored PCI config\n");
 	}
 
 	/* Assert that reset complete */
 	efx_reado(efx, &glb_ctl_reg_ker, FR_AB_GLB_CTL);
 	if (EFX_OWORD_FIELD(glb_ctl_reg_ker, FRF_AB_SWRST) != 0) {
 		rc = -ETIMEDOUT;
-		netif_err(efx, hw, efx->net_dev,
-			  "timed out waiting for hardware reset\n");
+		EFX_ERR(efx, "timed out waiting for hardware reset\n");
 		goto fail5;
 	}
-	netif_dbg(efx, hw, efx->net_dev, "hardware reset complete\n");
+	EFX_LOG(efx, "hardware reset complete\n");
 
 	return 0;
 
@@ -1190,9 +1165,8 @@ static void falcon_monitor(struct efx_nic *efx)
 
 	rc = falcon_board(efx)->type->monitor(efx);
 	if (rc) {
-		netif_err(efx, hw, efx->net_dev,
-			  "Board sensor %s; shutting down PHY\n",
-			  (rc == -ERANGE) ? "reported fault" : "failed");
+		EFX_ERR(efx, "Board sensor %s; shutting down PHY\n",
+			(rc == -ERANGE) ? "reported fault" : "failed");
 		efx->phy_mode |= PHY_MODE_LOW_POWER;
 		rc = __efx_reconfigure_port(efx);
 		WARN_ON(rc);
@@ -1243,8 +1217,7 @@ static int falcon_reset_sram(struct efx_nic *efx)
 	/* Wait for SRAM reset to complete */
 	count = 0;
 	do {
-		netif_dbg(efx, hw, efx->net_dev,
-			  "waiting for SRAM reset (attempt %d)...\n", count);
+		EFX_LOG(efx, "waiting for SRAM reset (attempt %d)...\n", count);
 
 		/* SRAM reset is slow; expect around 16ms */
 		schedule_timeout_uninterruptible(HZ / 50);
@@ -1252,14 +1225,13 @@ static int falcon_reset_sram(struct efx_nic *efx)
 		/* Check for reset complete */
 		efx_reado(efx, &srm_cfg_reg_ker, FR_AZ_SRM_CFG);
 		if (!EFX_OWORD_FIELD(srm_cfg_reg_ker, FRF_AZ_SRM_INIT_EN)) {
-			netif_dbg(efx, hw, efx->net_dev,
-				  "SRAM reset complete\n");
+			EFX_LOG(efx, "SRAM reset complete\n");
 
 			return 0;
 		}
 	} while (++count < 20);	/* wait upto 0.4 sec */
 
-	netif_err(efx, hw, efx->net_dev, "timed out waiting for SRAM reset\n");
+	EFX_ERR(efx, "timed out waiting for SRAM reset\n");
 	return -ETIMEDOUT;
 }
 
@@ -1318,8 +1290,7 @@ static int falcon_probe_nvconfig(struct efx_nic *efx)
 
 	rc = falcon_read_nvram(efx, nvconfig);
 	if (rc == -EINVAL) {
-		netif_err(efx, probe, efx->net_dev,
-			  "NVRAM is invalid therefore using defaults\n");
+		EFX_ERR(efx, "NVRAM is invalid therefore using defaults\n");
 		efx->phy_type = PHY_TYPE_NONE;
 		efx->mdio.prtad = MDIO_PRTAD_NONE;
 		board_rev = 0;
@@ -1353,8 +1324,7 @@ static int falcon_probe_nvconfig(struct efx_nic *efx)
 	/* Read the MAC addresses */
 	memcpy(efx->mac_address, nvconfig->mac_address[0], ETH_ALEN);
 
-	netif_dbg(efx, probe, efx->net_dev, "PHY is %d phy_id %d\n",
-		  efx->phy_type, efx->mdio.prtad);
+	EFX_LOG(efx, "PHY is %d phy_id %d\n", efx->phy_type, efx->mdio.prtad);
 
 	rc = falcon_probe_board(efx, board_rev);
 	if (rc)
@@ -1383,16 +1353,14 @@ static void falcon_probe_spi_devices(struct efx_nic *efx)
 	if (EFX_OWORD_FIELD(gpio_ctl, FRF_AB_GPIO3_PWRUP_VALUE)) {
 		boot_dev = (EFX_OWORD_FIELD(nic_stat, FRF_AB_SF_PRST) ?
 			    FFE_AB_SPI_DEVICE_FLASH : FFE_AB_SPI_DEVICE_EEPROM);
-		netif_dbg(efx, probe, efx->net_dev, "Booted from %s\n",
-			  boot_dev == FFE_AB_SPI_DEVICE_FLASH ?
-			  "flash" : "EEPROM");
+		EFX_LOG(efx, "Booted from %s\n",
+			boot_dev == FFE_AB_SPI_DEVICE_FLASH ? "flash" : "EEPROM");
 	} else {
 		/* Disable VPD and set clock dividers to safe
 		 * values for initial programming. */
 		boot_dev = -1;
-		netif_dbg(efx, probe, efx->net_dev,
-			  "Booted from internal ASIC settings;"
-			  " setting SPI config\n");
+		EFX_LOG(efx, "Booted from internal ASIC settings;"
+			" setting SPI config\n");
 		EFX_POPULATE_OWORD_3(ee_vpd_cfg, FRF_AB_EE_VPD_EN, 0,
 				     /* 125 MHz / 7 ~= 20 MHz */
 				     FRF_AB_EE_SF_CLOCK_DIV, 7,
@@ -1426,8 +1394,7 @@ static int falcon_probe_nic(struct efx_nic *efx)
 	rc = -ENODEV;
 
 	if (efx_nic_fpga_ver(efx) != 0) {
-		netif_err(efx, probe, efx->net_dev,
-			  "Falcon FPGA not supported\n");
+		EFX_ERR(efx, "Falcon FPGA not supported\n");
 		goto fail1;
 	}
 
@@ -1437,19 +1404,16 @@ static int falcon_probe_nic(struct efx_nic *efx)
 		u8 pci_rev = efx->pci_dev->revision;
 
 		if ((pci_rev == 0xff) || (pci_rev == 0)) {
-			netif_err(efx, probe, efx->net_dev,
-				  "Falcon rev A0 not supported\n");
+			EFX_ERR(efx, "Falcon rev A0 not supported\n");
 			goto fail1;
 		}
 		efx_reado(efx, &nic_stat, FR_AB_NIC_STAT);
 		if (EFX_OWORD_FIELD(nic_stat, FRF_AB_STRAP_10G) == 0) {
-			netif_err(efx, probe, efx->net_dev,
-				  "Falcon rev A1 1G not supported\n");
+			EFX_ERR(efx, "Falcon rev A1 1G not supported\n");
 			goto fail1;
 		}
 		if (EFX_OWORD_FIELD(nic_stat, FRF_AA_STRAP_PCIE) == 0) {
-			netif_err(efx, probe, efx->net_dev,
-				  "Falcon rev A1 PCI-X not supported\n");
+			EFX_ERR(efx, "Falcon rev A1 PCI-X not supported\n");
 			goto fail1;
 		}
 
@@ -1463,8 +1427,7 @@ static int falcon_probe_nic(struct efx_nic *efx)
 			}
 		}
 		if (!nic_data->pci_dev2) {
-			netif_err(efx, probe, efx->net_dev,
-				  "failed to find secondary function\n");
+			EFX_ERR(efx, "failed to find secondary function\n");
 			rc = -ENODEV;
 			goto fail2;
 		}
@@ -1473,7 +1436,7 @@ static int falcon_probe_nic(struct efx_nic *efx)
 	/* Now we can reset the NIC */
 	rc = falcon_reset_hw(efx, RESET_TYPE_ALL);
 	if (rc) {
-		netif_err(efx, probe, efx->net_dev, "failed to reset NIC\n");
+		EFX_ERR(efx, "failed to reset NIC\n");
 		goto fail3;
 	}
 
@@ -1483,11 +1446,9 @@ static int falcon_probe_nic(struct efx_nic *efx)
 		goto fail4;
 	BUG_ON(efx->irq_status.dma_addr & 0x0f);
 
-	netif_dbg(efx, probe, efx->net_dev,
-		  "INT_KER at %llx (virt %p phys %llx)\n",
-		  (u64)efx->irq_status.dma_addr,
-		  efx->irq_status.addr,
-		  (u64)virt_to_phys(efx->irq_status.addr));
+	EFX_LOG(efx, "INT_KER at %llx (virt %p phys %llx)\n",
+		(u64)efx->irq_status.dma_addr,
+		efx->irq_status.addr, (u64)virt_to_phys(efx->irq_status.addr));
 
 	falcon_probe_spi_devices(efx);
 
@@ -1511,8 +1472,7 @@ static int falcon_probe_nic(struct efx_nic *efx)
 
 	rc = falcon_board(efx)->type->init(efx);
 	if (rc) {
-		netif_err(efx, probe, efx->net_dev,
-			  "failed to initialise board\n");
+		EFX_ERR(efx, "failed to initialise board\n");
 		goto fail6;
 	}
 
@@ -1582,13 +1542,6 @@ static void falcon_init_rx_cfg(struct efx_nic *efx)
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_XON_TX_TH, ctrl_xon_thr);
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_XOFF_TX_TH, ctrl_xoff_thr);
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_INGR_EN, 1);
-
-		/* Enable hash insertion. This is broken for the
-		 * 'Falcon' hash so also select Toeplitz TCP/IPv4 and
-		 * IPv4 hashes. */
-		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_HASH_INSRT_HDR, 1);
-		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_HASH_ALG, 1);
-		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_IP_HASH, 1);
 	}
 	/* Always enable XOFF signal from RX FIFO.  We enable
 	 * or disable transmission of pause frames at the MAC. */
@@ -1662,12 +1615,8 @@ static int falcon_init_nic(struct efx_nic *efx)
 
 	falcon_init_rx_cfg(efx);
 
+	/* Set destination of both TX and RX Flush events */
 	if (efx_nic_rev(efx) >= EFX_REV_FALCON_B0) {
-		/* Set hash key for IPv4 */
-		memcpy(&temp, efx->rx_hash_key, sizeof(temp));
-		efx_writeo(efx, &temp, FR_BZ_RX_RSS_TKEY);
-
-		/* Set destination of both TX and RX Flush events */
 		EFX_POPULATE_OWORD_1(temp, FRF_BZ_FLS_EVQ_ID, 0);
 		efx_writeo(efx, &temp, FR_BZ_DP_CTRL);
 	}
@@ -1872,7 +1821,6 @@ struct efx_nic_type falcon_b0_nic_type = {
 	.evq_ptr_tbl_base = FR_BZ_EVQ_PTR_TBL,
 	.evq_rptr_tbl_base = FR_BZ_EVQ_RPTR,
 	.max_dma_mask = DMA_BIT_MASK(FSF_AZ_TX_KER_BUF_ADDR_WIDTH),
-	.rx_buffer_hash_size = 0x10,
 	.rx_buffer_padding = 0,
 	.max_interrupt_mode = EFX_INT_MODE_MSIX,
 	.phys_addr_channels = 32, /* Hardware limit is 64, but the legacy
@@ -1880,7 +1828,7 @@ struct efx_nic_type falcon_b0_nic_type = {
 				   * channels */
 	.tx_dc_base = 0x130000,
 	.rx_dc_base = 0x100000,
-	.offload_features = NETIF_F_IP_CSUM | NETIF_F_RXHASH,
+	.offload_features = NETIF_F_IP_CSUM,
 	.reset_world_flags = ETH_RESET_IRQ,
 };
 

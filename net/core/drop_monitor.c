@@ -223,11 +223,6 @@ static int set_all_monitor_traces(int state)
 
 	spin_lock(&trace_state_lock);
 
-	if (state == trace_state) {
-		rc = -EAGAIN;
-		goto out_unlock;
-	}
-
 	switch (state) {
 	case TRACE_ON:
 		rc |= register_trace_kfree_skb(trace_kfree_skb_hit, NULL);
@@ -256,12 +251,11 @@ static int set_all_monitor_traces(int state)
 
 	if (!rc)
 		trace_state = state;
-	else
-		rc = -EINPROGRESS;
 
-out_unlock:
 	spin_unlock(&trace_state_lock);
 
+	if (rc)
+		return -EINPROGRESS;
 	return rc;
 }
 
@@ -347,9 +341,9 @@ static struct notifier_block dropmon_net_notifier = {
 
 static int __init init_net_drop_monitor(void)
 {
+	int cpu;
+	int rc, i, ret;
 	struct per_cpu_dm_data *data;
-	int cpu, rc;
-
 	printk(KERN_INFO "Initalizing network drop monitor service\n");
 
 	if (sizeof(void *) > 8) {
@@ -357,12 +351,21 @@ static int __init init_net_drop_monitor(void)
 		return -ENOSPC;
 	}
 
-	rc = genl_register_family_with_ops(&net_drop_monitor_family,
-					   dropmon_ops,
-					   ARRAY_SIZE(dropmon_ops));
-	if (rc) {
+	if (genl_register_family(&net_drop_monitor_family) < 0) {
 		printk(KERN_ERR "Could not create drop monitor netlink family\n");
-		return rc;
+		return -EFAULT;
+	}
+
+	rc = -EFAULT;
+
+	for (i = 0; i < ARRAY_SIZE(dropmon_ops); i++) {
+		ret = genl_register_ops(&net_drop_monitor_family,
+					&dropmon_ops[i]);
+		if (ret) {
+			printk(KERN_CRIT "Failed to register operation %d\n",
+				dropmon_ops[i].cmd);
+			goto out_unreg;
+		}
 	}
 
 	rc = register_netdevice_notifier(&dropmon_net_notifier);

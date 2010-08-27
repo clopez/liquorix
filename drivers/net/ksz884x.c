@@ -1457,6 +1457,7 @@ struct dev_info {
  * @adapter:		Adapter device information.
  * @port:		Port information.
  * @monitor_time_info:	Timer to monitor ports.
+ * @stats:		Network statistics.
  * @proc_sem:		Semaphore for proc accessing.
  * @id:			Device ID.
  * @mii_if:		MII interface information.
@@ -1470,6 +1471,7 @@ struct dev_priv {
 	struct dev_info *adapter;
 	struct ksz_port port;
 	struct ksz_timer_info monitor_timer_info;
+	struct net_device_stats stats;
 
 	struct semaphore proc_sem;
 	int id;
@@ -4749,8 +4751,8 @@ static void send_packet(struct sk_buff *skb, struct net_device *dev)
 	hw_send_pkt(hw);
 
 	/* Update transmit statistics. */
-	dev->stats.tx_packets++;
-	dev->stats.tx_bytes += len;
+	priv->stats.tx_packets++;
+	priv->stats.tx_bytes += len;
 }
 
 /**
@@ -5028,7 +5030,7 @@ static inline int rx_proc(struct net_device *dev, struct ksz_hw* hw,
 		/* skb->data != skb->head */
 		skb = dev_alloc_skb(packet_len + 2);
 		if (!skb) {
-			dev->stats.rx_dropped++;
+			priv->stats.rx_dropped++;
 			return -ENOMEM;
 		}
 
@@ -5048,8 +5050,8 @@ static inline int rx_proc(struct net_device *dev, struct ksz_hw* hw,
 		csum_verified(skb);
 
 	/* Update receive statistics. */
-	dev->stats.rx_packets++;
-	dev->stats.rx_bytes += packet_len;
+	priv->stats.rx_packets++;
+	priv->stats.rx_bytes += packet_len;
 
 	/* Notify upper layer for received packet. */
 	rx_status = netif_rx(skb);
@@ -5289,7 +5291,7 @@ static irqreturn_t netdev_intr(int irq, void *dev_id)
 		}
 
 		if (unlikely(int_enable & KS884X_INT_RX_OVERRUN)) {
-			dev->stats.rx_fifo_errors++;
+			priv->stats.rx_fifo_errors++;
 			hw_resume_rx(hw);
 		}
 
@@ -5520,7 +5522,7 @@ static int netdev_open(struct net_device *dev)
 	priv->promiscuous = 0;
 
 	/* Reset device statistics. */
-	memset(&dev->stats, 0, sizeof(struct net_device_stats));
+	memset(&priv->stats, 0, sizeof(struct net_device_stats));
 	memset((void *) port->counter, 0,
 		(sizeof(u64) * OID_COUNTER_LAST));
 
@@ -5620,42 +5622,42 @@ static struct net_device_stats *netdev_query_statistics(struct net_device *dev)
 	int i;
 	int p;
 
-	dev->stats.rx_errors = port->counter[OID_COUNTER_RCV_ERROR];
-	dev->stats.tx_errors = port->counter[OID_COUNTER_XMIT_ERROR];
+	priv->stats.rx_errors = port->counter[OID_COUNTER_RCV_ERROR];
+	priv->stats.tx_errors = port->counter[OID_COUNTER_XMIT_ERROR];
 
 	/* Reset to zero to add count later. */
-	dev->stats.multicast = 0;
-	dev->stats.collisions = 0;
-	dev->stats.rx_length_errors = 0;
-	dev->stats.rx_crc_errors = 0;
-	dev->stats.rx_frame_errors = 0;
-	dev->stats.tx_window_errors = 0;
+	priv->stats.multicast = 0;
+	priv->stats.collisions = 0;
+	priv->stats.rx_length_errors = 0;
+	priv->stats.rx_crc_errors = 0;
+	priv->stats.rx_frame_errors = 0;
+	priv->stats.tx_window_errors = 0;
 
 	for (i = 0, p = port->first_port; i < port->mib_port_cnt; i++, p++) {
 		mib = &hw->port_mib[p];
 
-		dev->stats.multicast += (unsigned long)
+		priv->stats.multicast += (unsigned long)
 			mib->counter[MIB_COUNTER_RX_MULTICAST];
 
-		dev->stats.collisions += (unsigned long)
+		priv->stats.collisions += (unsigned long)
 			mib->counter[MIB_COUNTER_TX_TOTAL_COLLISION];
 
-		dev->stats.rx_length_errors += (unsigned long)(
+		priv->stats.rx_length_errors += (unsigned long)(
 			mib->counter[MIB_COUNTER_RX_UNDERSIZE] +
 			mib->counter[MIB_COUNTER_RX_FRAGMENT] +
 			mib->counter[MIB_COUNTER_RX_OVERSIZE] +
 			mib->counter[MIB_COUNTER_RX_JABBER]);
-		dev->stats.rx_crc_errors += (unsigned long)
+		priv->stats.rx_crc_errors += (unsigned long)
 			mib->counter[MIB_COUNTER_RX_CRC_ERR];
-		dev->stats.rx_frame_errors += (unsigned long)(
+		priv->stats.rx_frame_errors += (unsigned long)(
 			mib->counter[MIB_COUNTER_RX_ALIGNMENT_ERR] +
 			mib->counter[MIB_COUNTER_RX_SYMBOL_ERR]);
 
-		dev->stats.tx_window_errors += (unsigned long)
+		priv->stats.tx_window_errors += (unsigned long)
 			mib->counter[MIB_COUNTER_TX_LATE_COLLISION];
 	}
 
-	return &dev->stats;
+	return &priv->stats;
 }
 
 /**
@@ -5716,7 +5718,7 @@ static void dev_set_promiscuous(struct net_device *dev, struct dev_priv *priv,
 		 * from the bridge.
 		 */
 		if ((hw->features & STP_SUPPORT) && !promiscuous &&
-		    (dev->priv_flags & IFF_BRIDGE_PORT)) {
+				dev->br_port) {
 			struct ksz_switch *sw = hw->ksz_switch;
 			int port = priv->port.first_port;
 
@@ -6894,12 +6896,13 @@ static void get_mac_addr(struct dev_info *hw_priv, u8 *macaddr, int port)
 	i = j = num = got_num = 0;
 	while (j < MAC_ADDR_LEN) {
 		if (macaddr[i]) {
-			int digit;
-
 			got_num = 1;
-			digit = hex_to_bin(macaddr[i]);
-			if (digit >= 0)
-				num = num * 16 + digit;
+			if ('0' <= macaddr[i] && macaddr[i] <= '9')
+				num = num * 16 + macaddr[i] - '0';
+			else if ('A' <= macaddr[i] && macaddr[i] <= 'F')
+				num = num * 16 + 10 + macaddr[i] - 'A';
+			else if ('a' <= macaddr[i] && macaddr[i] <= 'f')
+				num = num * 16 + 10 + macaddr[i] - 'a';
 			else if (':' == macaddr[i])
 				got_num = 2;
 			else

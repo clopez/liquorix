@@ -300,9 +300,8 @@ static int rs_tl_turn_on_agg_for_tid(struct iwl_priv *priv,
 				      struct ieee80211_sta *sta)
 {
 	int ret = -EAGAIN;
-	u32 load = rs_tl_get_load(lq_data, tid);
 
-	if (load > IWL_AGG_LOAD_THRESHOLD) {
+	if (rs_tl_get_load(lq_data, tid) > IWL_AGG_LOAD_THRESHOLD) {
 		IWL_DEBUG_HT(priv, "Starting Tx agg: STA: %pM tid: %d\n",
 				sta->addr, tid);
 		ret = ieee80211_start_tx_ba_session(sta, tid);
@@ -312,14 +311,13 @@ static int rs_tl_turn_on_agg_for_tid(struct iwl_priv *priv,
 			 * this might be cause by reloading firmware
 			 * stop the tx ba session here
 			 */
-			IWL_ERR(priv, "Fail start Tx agg on tid: %d\n",
+			IWL_DEBUG_HT(priv, "Fail start Tx agg on tid: %d\n",
 				tid);
-			ieee80211_stop_tx_ba_session(sta, tid);
+			ieee80211_stop_tx_ba_session(sta, tid,
+						WLAN_BACK_INITIATOR);
 		}
-	} else {
-		IWL_ERR(priv, "Aggregation not enabled for tid %d "
-			"because load = %u\n", tid, load);
-	}
+	} else
+		IWL_ERR(priv, "Fail finding valid aggregation tid: %d\n", tid);
 	return ret;
 }
 
@@ -327,11 +325,18 @@ static void rs_tl_turn_on_agg(struct iwl_priv *priv, u8 tid,
 			      struct iwl_lq_sta *lq_data,
 			      struct ieee80211_sta *sta)
 {
-	if (tid < TID_MAX_LOAD_COUNT)
-		rs_tl_turn_on_agg_for_tid(priv, lq_data, tid, sta);
-	else
-		IWL_ERR(priv, "tid exceeds max load count: %d/%d\n",
-			tid, TID_MAX_LOAD_COUNT);
+	if ((tid < TID_MAX_LOAD_COUNT) &&
+	    !rs_tl_turn_on_agg_for_tid(priv, lq_data, tid, sta)) {
+		if (priv->cfg->use_rts_for_ht) {
+			/*
+			 * switch to RTS/CTS if it is the prefer protection
+			 * method for HT traffic
+			 */
+			IWL_DEBUG_HT(priv, "use RTS/CTS protection for HT\n");
+			priv->staging_rxon.flags &= ~RXON_FLG_SELF_CTS_EN;
+			iwlcore_commit_rxon(priv);
+		}
+	}
 }
 
 static inline int get_num_of_ant_from_rate(u32 rate_n_flags)

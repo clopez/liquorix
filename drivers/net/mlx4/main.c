@@ -1050,7 +1050,8 @@ static int __mlx4_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	int err;
 	int port;
 
-	pr_info(DRV_NAME ": Initializing %s\n", pci_name(pdev));
+	printk(KERN_INFO PFX "Initializing %s\n",
+	       pci_name(pdev));
 
 	err = pci_enable_device(pdev);
 	if (err) {
@@ -1215,7 +1216,12 @@ err_disable_pdev:
 static int __devinit mlx4_init_one(struct pci_dev *pdev,
 				   const struct pci_device_id *id)
 {
-	printk_once(KERN_INFO "%s", mlx4_version);
+	static int mlx4_version_printed;
+
+	if (!mlx4_version_printed) {
+		printk(KERN_INFO "%s", mlx4_version);
+		++mlx4_version_printed;
+	}
 
 	return __mlx4_init_one(pdev, id);
 }
@@ -1295,17 +1301,17 @@ static struct pci_driver mlx4_driver = {
 static int __init mlx4_verify_params(void)
 {
 	if ((log_num_mac < 0) || (log_num_mac > 7)) {
-		pr_warning("mlx4_core: bad num_mac: %d\n", log_num_mac);
+		printk(KERN_WARNING "mlx4_core: bad num_mac: %d\n", log_num_mac);
 		return -1;
 	}
 
 	if ((log_num_vlan < 0) || (log_num_vlan > 7)) {
-		pr_warning("mlx4_core: bad num_vlan: %d\n", log_num_vlan);
+		printk(KERN_WARNING "mlx4_core: bad num_vlan: %d\n", log_num_vlan);
 		return -1;
 	}
 
 	if ((log_mtts_per_seg < 1) || (log_mtts_per_seg > 5)) {
-		pr_warning("mlx4_core: bad log_mtts_per_seg: %d\n", log_mtts_per_seg);
+		printk(KERN_WARNING "mlx4_core: bad log_mtts_per_seg: %d\n", log_mtts_per_seg);
 		return -1;
 	}
 

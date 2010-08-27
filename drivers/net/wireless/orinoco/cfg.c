@@ -117,8 +117,9 @@ static int orinoco_change_vif(struct wiphy *wiphy, struct net_device *dev,
 
 	case NL80211_IFTYPE_MONITOR:
 		if (priv->broken_monitor && !force_monitor) {
-			wiphy_warn(wiphy,
-				   "Monitor mode support is buggy in this firmware, not enabling\n");
+			printk(KERN_WARNING "%s: Monitor mode support is "
+			       "buggy in this firmware, not enabling\n",
+			       wiphy_name(wiphy));
 			err = -EINVAL;
 		}
 		break;

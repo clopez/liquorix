@@ -616,9 +616,8 @@ extern unsigned char IDX_ACTIVATE_WRITE[];
 #define QETH_IS_IDX_ACT_POS_REPLY(buffer) (((buffer)[0x08] & 3) == 2)
 #define QETH_IDX_REPLY_LEVEL(buffer) (buffer + 0x12)
 #define QETH_IDX_ACT_CAUSE_CODE(buffer) (buffer)[0x09]
-#define QETH_IDX_ACT_ERR_EXCL		0x19
-#define QETH_IDX_ACT_ERR_AUTH		0x1E
-#define QETH_IDX_ACT_ERR_AUTH_USER	0x20
+#define QETH_IDX_ACT_ERR_EXCL	0x19
+#define QETH_IDX_ACT_ERR_AUTH	0x1E
 
 #define PDU_ENCAPSULATION(buffer) \
 	(buffer + *(buffer + (*(buffer + 0x0b)) + \

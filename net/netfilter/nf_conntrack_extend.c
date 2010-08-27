@@ -23,10 +23,9 @@ void __nf_ct_ext_destroy(struct nf_conn *ct)
 {
 	unsigned int i;
 	struct nf_ct_ext_type *t;
-	struct nf_ct_ext *ext = ct->ext;
 
 	for (i = 0; i < NF_CT_EXT_NUM; i++) {
-		if (!__nf_ct_ext_exist(ext, i))
+		if (!nf_ct_ext_exist(ct, i))
 			continue;
 
 		rcu_read_lock();
@@ -74,45 +73,44 @@ static void __nf_ct_ext_free_rcu(struct rcu_head *head)
 
 void *__nf_ct_ext_add(struct nf_conn *ct, enum nf_ct_ext_id id, gfp_t gfp)
 {
-	struct nf_ct_ext *old, *new;
+	struct nf_ct_ext *new;
 	int i, newlen, newoff;
 	struct nf_ct_ext_type *t;
 
 	/* Conntrack must not be confirmed to avoid races on reallocation. */
 	NF_CT_ASSERT(!nf_ct_is_confirmed(ct));
 
-	old = ct->ext;
-	if (!old)
+	if (!ct->ext)
 		return nf_ct_ext_create(&ct->ext, id, gfp);
 
-	if (__nf_ct_ext_exist(old, id))
+	if (nf_ct_ext_exist(ct, id))
 		return NULL;
 
 	rcu_read_lock();
 	t = rcu_dereference(nf_ct_ext_types[id]);
 	BUG_ON(t == NULL);
 
-	newoff = ALIGN(old->len, t->align);
+	newoff = ALIGN(ct->ext->len, t->align);
 	newlen = newoff + t->len;
 	rcu_read_unlock();
 
-	new = __krealloc(old, newlen, gfp);
+	new = __krealloc(ct->ext, newlen, gfp);
 	if (!new)
 		return NULL;
 
-	if (new != old) {
+	if (new != ct->ext) {
 		for (i = 0; i < NF_CT_EXT_NUM; i++) {
-			if (!__nf_ct_ext_exist(old, i))
+			if (!nf_ct_ext_exist(ct, i))
 				continue;
 
 			rcu_read_lock();
 			t = rcu_dereference(nf_ct_ext_types[i]);
 			if (t && t->move)
 				t->move((void *)new + new->offset[i],
-					(void *)old + old->offset[i]);
+					(void *)ct->ext + ct->ext->offset[i]);
 			rcu_read_unlock();
 		}
-		call_rcu(&old->rcu, __nf_ct_ext_free_rcu);
+		call_rcu(&ct->ext->rcu, __nf_ct_ext_free_rcu);
 		ct->ext = new;
 	}
 

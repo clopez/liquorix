@@ -295,8 +295,7 @@ struct sock {
 	unsigned short		sk_ack_backlog;
 	unsigned short		sk_max_ack_backlog;
 	__u32			sk_priority;
-	struct pid		*sk_peer_pid;
-	const struct cred	*sk_peer_cred;
+	struct ucred		sk_peercred;
 	long			sk_rcvtimeo;
 	long			sk_sndtimeo;
 	struct sk_filter      	*sk_filter;
@@ -772,7 +771,6 @@ struct proto {
 	int			*sysctl_wmem;
 	int			*sysctl_rmem;
 	int			max_header;
-	bool			no_autobind;
 
 	struct kmem_cache	*slab;
 	unsigned int		obj_size;
@@ -1708,13 +1706,19 @@ static inline void sk_eat_skb(struct sock *sk, struct sk_buff *skb, int copied_e
 static inline
 struct net *sock_net(const struct sock *sk)
 {
-	return read_pnet(&sk->sk_net);
+#ifdef CONFIG_NET_NS
+	return sk->sk_net;
+#else
+	return &init_net;
+#endif
 }
 
 static inline
 void sock_net_set(struct sock *sk, struct net *net)
 {
-	write_pnet(&sk->sk_net, net);
+#ifdef CONFIG_NET_NS
+	sk->sk_net = net;
+#endif
 }
 
 /*

@@ -207,7 +207,7 @@ struct kaweth_ethernet_configuration
 	__le16 segment_size;
 	__u16 max_multicast_filters;
 	__u8 reserved3;
-} __packed;
+} __attribute__ ((packed));
 
 /****************************************************************
  *     kaweth_device

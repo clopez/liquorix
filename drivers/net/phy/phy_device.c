@@ -460,7 +460,6 @@ int phy_attach_direct(struct net_device *dev, struct phy_device *phydev,
 	}
 
 	phydev->attached_dev = dev;
-	dev->phydev = phydev;
 
 	phydev->dev_flags = flags;
 
@@ -514,7 +513,6 @@ EXPORT_SYMBOL(phy_attach);
  */
 void phy_detach(struct phy_device *phydev)
 {
-	phydev->attached_dev->phydev = NULL;
 	phydev->attached_dev = NULL;
 
 	/* If the device had no specific driver before (i.e. - it

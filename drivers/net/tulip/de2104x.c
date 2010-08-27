@@ -262,13 +262,13 @@ struct de_srom_media_block {
 	u16			csr13;
 	u16			csr14;
 	u16			csr15;
-} __packed;
+} __attribute__((packed));
 
 struct de_srom_info_leaf {
 	u16			default_media;
 	u8			n_blocks;
 	u8			unused;
-} __packed;
+} __attribute__((packed));
 
 struct de_desc {
 	__le32			opts1;

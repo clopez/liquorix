@@ -303,7 +303,6 @@ int genl_register_ops(struct genl_family *family, struct genl_ops *ops)
 errout:
 	return err;
 }
-EXPORT_SYMBOL(genl_register_ops);
 
 /**
  * genl_unregister_ops - unregister generic netlink operations
@@ -338,7 +337,6 @@ int genl_unregister_ops(struct genl_family *family, struct genl_ops *ops)
 
 	return -ENOENT;
 }
-EXPORT_SYMBOL(genl_unregister_ops);
 
 /**
  * genl_register_family - register a generic netlink family
@@ -407,7 +405,6 @@ errout_locked:
 errout:
 	return err;
 }
-EXPORT_SYMBOL(genl_register_family);
 
 /**
  * genl_register_family_with_ops - register a generic netlink family
@@ -488,7 +485,6 @@ int genl_unregister_family(struct genl_family *family)
 
 	return -ENOENT;
 }
-EXPORT_SYMBOL(genl_unregister_family);
 
 static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
@@ -877,7 +873,11 @@ static int __init genl_init(void)
 	for (i = 0; i < GENL_FAM_TAB_SIZE; i++)
 		INIT_LIST_HEAD(&family_ht[i]);
 
-	err = genl_register_family_with_ops(&genl_ctrl, &genl_ctrl_ops, 1);
+	err = genl_register_family(&genl_ctrl);
+	if (err < 0)
+		goto problem;
+
+	err = genl_register_ops(&genl_ctrl, &genl_ctrl_ops);
 	if (err < 0)
 		goto problem;
 
@@ -898,6 +898,11 @@ problem:
 }
 
 subsys_initcall(genl_init);
+
+EXPORT_SYMBOL(genl_register_ops);
+EXPORT_SYMBOL(genl_unregister_ops);
+EXPORT_SYMBOL(genl_register_family);
+EXPORT_SYMBOL(genl_unregister_family);
 
 static int genlmsg_mcast(struct sk_buff *skb, u32 pid, unsigned long group,
 			 gfp_t flags)

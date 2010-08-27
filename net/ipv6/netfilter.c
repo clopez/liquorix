@@ -151,7 +151,9 @@ static __sum16 nf_ip6_checksum_partial(struct sk_buff *skb, unsigned int hook,
 							 protocol,
 							 csum_sub(0, hsum)));
 		skb->ip_summed = CHECKSUM_NONE;
-		return __skb_checksum_complete_head(skb, dataoff + len);
+		csum = __skb_checksum_complete_head(skb, dataoff + len);
+		if (!csum)
+			skb->ip_summed = CHECKSUM_UNNECESSARY;
 	}
 	return csum;
 };

@@ -11,8 +11,7 @@
 #include <linux/netfilter/xt_quota.h>
 
 struct xt_quota_priv {
-	spinlock_t	lock;
-	uint64_t	quota;
+	uint64_t quota;
 };
 
 MODULE_LICENSE("GPL");
@@ -21,6 +20,8 @@ MODULE_DESCRIPTION("Xtables: countdown quota match");
 MODULE_ALIAS("ipt_quota");
 MODULE_ALIAS("ip6t_quota");
 
+static DEFINE_SPINLOCK(quota_lock);
+
 static bool
 quota_mt(const struct sk_buff *skb, struct xt_action_param *par)
 {
@@ -28,7 +29,7 @@ quota_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	struct xt_quota_priv *priv = q->master;
 	bool ret = q->flags & XT_QUOTA_INVERT;
 
-	spin_lock_bh(&priv->lock);
+	spin_lock_bh(&quota_lock);
 	if (priv->quota >= skb->len) {
 		priv->quota -= skb->len;
 		ret = !ret;
@@ -36,7 +37,9 @@ quota_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		/* we do not allow even small packets from now on */
 		priv->quota = 0;
 	}
-	spin_unlock_bh(&priv->lock);
+	/* Copy quota back to matchinfo so that iptables can display it */
+	q->quota = priv->quota;
+	spin_unlock_bh(&quota_lock);
 
 	return ret;
 }
@@ -52,7 +55,6 @@ static int quota_mt_check(const struct xt_mtchk_param *par)
 	if (q->master == NULL)
 		return -ENOMEM;
 
-	spin_lock_init(&q->master->lock);
 	q->master->quota = q->quota;
 	return 0;
 }

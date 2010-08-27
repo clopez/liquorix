@@ -44,7 +44,6 @@
 #include <linux/usb.h>
 #include <linux/usb/usbnet.h>
 #include <linux/slab.h>
-#include <linux/kernel.h>
 
 #define DRIVER_VERSION		"22-Aug-2005"
 
@@ -159,6 +158,16 @@ int usbnet_get_endpoints(struct usbnet *dev, struct usb_interface *intf)
 }
 EXPORT_SYMBOL_GPL(usbnet_get_endpoints);
 
+static u8 nibble(unsigned char c)
+{
+	if (likely(isdigit(c)))
+		return c - '0';
+	c = toupper(c);
+	if (likely(isxdigit(c)))
+		return 10 + c - 'A';
+	return 0;
+}
+
 int usbnet_get_ethernet_addr(struct usbnet *dev, int iMACAddress)
 {
 	int 		tmp, i;
@@ -174,7 +183,7 @@ int usbnet_get_ethernet_addr(struct usbnet *dev, int iMACAddress)
 	}
 	for (i = tmp = 0; i < 6; i++, tmp += 2)
 		dev->net->dev_addr [i] =
-			(hex_to_bin(buf[tmp]) << 4) + hex_to_bin(buf[tmp + 1]);
+			(nibble(buf [tmp]) << 4) + nibble(buf [tmp + 1]);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(usbnet_get_ethernet_addr);
@@ -615,7 +624,7 @@ static void usbnet_terminate_urbs(struct usbnet *dev)
 	while (!skb_queue_empty(&dev->rxq)
 		&& !skb_queue_empty(&dev->txq)
 		&& !skb_queue_empty(&dev->done)) {
-			schedule_timeout(msecs_to_jiffies(UNLINK_TIMEOUT_MS));
+			schedule_timeout(UNLINK_TIMEOUT_MS);
 			set_current_state(TASK_UNINTERRUPTIBLE);
 			netif_dbg(dev, ifdown, dev->net,
 				  "waited for %d urb completions\n", temp);
@@ -634,7 +643,7 @@ int usbnet_stop (struct net_device *net)
 	netif_stop_queue (net);
 
 	netif_info(dev, ifdown, dev->net,
-		   "stop stats: rx/tx %lu/%lu, errs %lu/%lu\n",
+		   "stop stats: rx/tx %ld/%ld, errs %ld/%ld\n",
 		   net->stats.rx_packets, net->stats.tx_packets,
 		   net->stats.rx_errors, net->stats.tx_errors);
 

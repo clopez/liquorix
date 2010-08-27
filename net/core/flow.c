@@ -62,7 +62,6 @@ struct flow_cache {
 };
 
 atomic_t flow_cache_genid = ATOMIC_INIT(0);
-EXPORT_SYMBOL(flow_cache_genid);
 static struct flow_cache flow_cache_global;
 static struct kmem_cache *flow_cachep;
 
@@ -223,7 +222,7 @@ flow_cache_lookup(struct net *net, struct flowi *key, u16 family, u8 dir,
 	unsigned int hash;
 
 	local_bh_disable();
-	fcp = this_cpu_ptr(fc->percpu);
+	fcp = per_cpu_ptr(fc->percpu, smp_processor_id());
 
 	fle = NULL;
 	flo = NULL;
@@ -292,7 +291,6 @@ ret_object:
 	local_bh_enable();
 	return flo;
 }
-EXPORT_SYMBOL(flow_cache_lookup);
 
 static void flow_cache_flush_tasklet(unsigned long data)
 {
@@ -304,7 +302,7 @@ static void flow_cache_flush_tasklet(unsigned long data)
 	LIST_HEAD(gc_list);
 	int i, deleted = 0;
 
-	fcp = this_cpu_ptr(fc->percpu);
+	fcp = per_cpu_ptr(fc->percpu, smp_processor_id());
 	for (i = 0; i < flow_cache_hash_size(fc); i++) {
 		hlist_for_each_entry_safe(fle, entry, tmp,
 					  &fcp->hash_table[i], u.hlist) {
@@ -426,3 +424,6 @@ static int __init flow_cache_init_global(void)
 }
 
 module_init(flow_cache_init_global);
+
+EXPORT_SYMBOL(flow_cache_genid);
+EXPORT_SYMBOL(flow_cache_lookup);

@@ -43,6 +43,7 @@ void sk_stream_write_space(struct sock *sk)
 		rcu_read_unlock();
 	}
 }
+
 EXPORT_SYMBOL(sk_stream_write_space);
 
 /**
@@ -80,6 +81,7 @@ int sk_stream_wait_connect(struct sock *sk, long *timeo_p)
 	} while (!done);
 	return 0;
 }
+
 EXPORT_SYMBOL(sk_stream_wait_connect);
 
 /**
@@ -107,6 +109,7 @@ void sk_stream_wait_close(struct sock *sk, long timeout)
 		finish_wait(sk_sleep(sk), &wait);
 	}
 }
+
 EXPORT_SYMBOL(sk_stream_wait_close);
 
 /**
@@ -171,6 +174,7 @@ do_interrupted:
 	err = sock_intr_errno(*timeo_p);
 	goto out;
 }
+
 EXPORT_SYMBOL(sk_stream_wait_memory);
 
 int sk_stream_error(struct sock *sk, int flags, int err)
@@ -181,6 +185,7 @@ int sk_stream_error(struct sock *sk, int flags, int err)
 		send_sig(SIGPIPE, current, 0);
 	return err;
 }
+
 EXPORT_SYMBOL(sk_stream_error);
 
 void sk_stream_kill_queues(struct sock *sk)
@@ -205,4 +210,5 @@ void sk_stream_kill_queues(struct sock *sk)
 	 * have gone away, only the net layer knows can touch it.
 	 */
 }
+
 EXPORT_SYMBOL(sk_stream_kill_queues);

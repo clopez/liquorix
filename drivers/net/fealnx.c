@@ -382,6 +382,8 @@ struct netdev_private {
 
 	spinlock_t lock;
 
+	struct net_device_stats stats;
+
 	/* Media monitoring timer. */
 	struct timer_list timer;
 
@@ -1232,7 +1234,7 @@ static void fealnx_tx_timeout(struct net_device *dev)
 	spin_unlock_irqrestore(&np->lock, flags);
 
 	dev->trans_start = jiffies; /* prevent tx timeout */
-	dev->stats.tx_errors++;
+	np->stats.tx_errors++;
 	netif_wake_queue(dev); /* or .._start_.. ?? */
 }
 
@@ -1477,11 +1479,10 @@ static irqreturn_t intr_handler(int irq, void *dev_instance)
 
 		if (intr_status & CNTOVF) {
 			/* missed pkts */
-			dev->stats.rx_missed_errors +=
-				ioread32(ioaddr + TALLY) & 0x7fff;
+			np->stats.rx_missed_errors += ioread32(ioaddr + TALLY) & 0x7fff;
 
 			/* crc error */
-			dev->stats.rx_crc_errors +=
+			np->stats.rx_crc_errors +=
 			    (ioread32(ioaddr + TALLY) & 0x7fff0000) >> 16;
 		}
 
@@ -1512,30 +1513,30 @@ static irqreturn_t intr_handler(int irq, void *dev_instance)
 
 			if (!(np->crvalue & CR_W_ENH)) {
 				if (tx_status & (CSL | LC | EC | UDF | HF)) {
-					dev->stats.tx_errors++;
+					np->stats.tx_errors++;
 					if (tx_status & EC)
-						dev->stats.tx_aborted_errors++;
+						np->stats.tx_aborted_errors++;
 					if (tx_status & CSL)
-						dev->stats.tx_carrier_errors++;
+						np->stats.tx_carrier_errors++;
 					if (tx_status & LC)
-						dev->stats.tx_window_errors++;
+						np->stats.tx_window_errors++;
 					if (tx_status & UDF)
-						dev->stats.tx_fifo_errors++;
+						np->stats.tx_fifo_errors++;
 					if ((tx_status & HF) && np->mii.full_duplex == 0)
-						dev->stats.tx_heartbeat_errors++;
+						np->stats.tx_heartbeat_errors++;
 
 				} else {
-					dev->stats.tx_bytes +=
+					np->stats.tx_bytes +=
 					    ((tx_control & PKTSMask) >> PKTSShift);
 
-					dev->stats.collisions +=
+					np->stats.collisions +=
 					    ((tx_status & NCRMask) >> NCRShift);
-					dev->stats.tx_packets++;
+					np->stats.tx_packets++;
 				}
 			} else {
-				dev->stats.tx_bytes +=
+				np->stats.tx_bytes +=
 				    ((tx_control & PKTSMask) >> PKTSShift);
-				dev->stats.tx_packets++;
+				np->stats.tx_packets++;
 			}
 
 			/* Free the original skb. */
@@ -1563,12 +1564,10 @@ static irqreturn_t intr_handler(int irq, void *dev_instance)
 			long data;
 
 			data = ioread32(ioaddr + TSR);
-			dev->stats.tx_errors += (data & 0xff000000) >> 24;
-			dev->stats.tx_aborted_errors +=
-				(data & 0xff000000) >> 24;
-			dev->stats.tx_window_errors +=
-				(data & 0x00ff0000) >> 16;
-			dev->stats.collisions += (data & 0x0000ffff);
+			np->stats.tx_errors += (data & 0xff000000) >> 24;
+			np->stats.tx_aborted_errors += (data & 0xff000000) >> 24;
+			np->stats.tx_window_errors += (data & 0x00ff0000) >> 16;
+			np->stats.collisions += (data & 0x0000ffff);
 		}
 
 		if (--boguscnt < 0) {
@@ -1594,11 +1593,10 @@ static irqreturn_t intr_handler(int irq, void *dev_instance)
 
 	/* read the tally counters */
 	/* missed pkts */
-	dev->stats.rx_missed_errors += ioread32(ioaddr + TALLY) & 0x7fff;
+	np->stats.rx_missed_errors += ioread32(ioaddr + TALLY) & 0x7fff;
 
 	/* crc error */
-	dev->stats.rx_crc_errors +=
-		(ioread32(ioaddr + TALLY) & 0x7fff0000) >> 16;
+	np->stats.rx_crc_errors += (ioread32(ioaddr + TALLY) & 0x7fff0000) >> 16;
 
 	if (debug)
 		printk(KERN_DEBUG "%s: exiting interrupt, status=%#4.4x.\n",
@@ -1637,13 +1635,13 @@ static int netdev_rx(struct net_device *dev)
 					       "%s: Receive error, Rx status %8.8x.\n",
 					       dev->name, rx_status);
 
-				dev->stats.rx_errors++;	/* end of a packet. */
+				np->stats.rx_errors++;	/* end of a packet. */
 				if (rx_status & (LONG | RUNT))
-					dev->stats.rx_length_errors++;
+					np->stats.rx_length_errors++;
 				if (rx_status & RXER)
-					dev->stats.rx_frame_errors++;
+					np->stats.rx_frame_errors++;
 				if (rx_status & CRC)
-					dev->stats.rx_crc_errors++;
+					np->stats.rx_crc_errors++;
 			} else {
 				int need_to_reset = 0;
 				int desno = 0;
@@ -1669,7 +1667,7 @@ static int netdev_rx(struct net_device *dev)
 				if (need_to_reset == 0) {
 					int i;
 
-					dev->stats.rx_length_errors++;
+					np->stats.rx_length_errors++;
 
 					/* free all rx descriptors related this long pkt */
 					for (i = 0; i < desno; ++i) {
@@ -1735,8 +1733,8 @@ static int netdev_rx(struct net_device *dev)
 			}
 			skb->protocol = eth_type_trans(skb, dev);
 			netif_rx(skb);
-			dev->stats.rx_packets++;
-			dev->stats.rx_bytes += pkt_len;
+			np->stats.rx_packets++;
+			np->stats.rx_bytes += pkt_len;
 		}
 
 		np->cur_rx = np->cur_rx->next_desc_logical;
@@ -1756,13 +1754,11 @@ static struct net_device_stats *get_stats(struct net_device *dev)
 
 	/* The chip only need report frame silently dropped. */
 	if (netif_running(dev)) {
-		dev->stats.rx_missed_errors +=
-			ioread32(ioaddr + TALLY) & 0x7fff;
-		dev->stats.rx_crc_errors +=
-			(ioread32(ioaddr + TALLY) & 0x7fff0000) >> 16;
+		np->stats.rx_missed_errors += ioread32(ioaddr + TALLY) & 0x7fff;
+		np->stats.rx_crc_errors += (ioread32(ioaddr + TALLY) & 0x7fff0000) >> 16;
 	}
 
-	return &dev->stats;
+	return &np->stats;
 }
 
 

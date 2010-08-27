@@ -826,7 +826,7 @@ static int mpc52xx_fec_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	if (!priv->phydev)
 		return -ENOTSUPP;
 
-	return phy_mii_ioctl(priv->phydev, rq, cmd);
+	return phy_mii_ioctl(priv->phydev, if_mii(rq), cmd);
 }
 
 static const struct net_device_ops mpc52xx_fec_netdev_ops = {
@@ -875,21 +875,17 @@ mpc52xx_fec_probe(struct of_device *op, const struct of_device_id *match)
 	if (rv) {
 		printk(KERN_ERR DRIVER_NAME ": "
 				"Error while parsing device node resource\n" );
-		goto err_netdev;
+		return rv;
 	}
 	if ((mem.end - mem.start + 1) < sizeof(struct mpc52xx_fec)) {
 		printk(KERN_ERR DRIVER_NAME
 			" - invalid resource size (%lx < %x), check mpc52xx_devices.c\n",
 			(unsigned long)(mem.end - mem.start + 1), sizeof(struct mpc52xx_fec));
-		rv = -EINVAL;
-		goto err_netdev;
+		return -EINVAL;
 	}
 
-	if (!request_mem_region(mem.start, sizeof(struct mpc52xx_fec),
-				DRIVER_NAME)) {
-		rv = -EBUSY;
-		goto err_netdev;
-	}
+	if (!request_mem_region(mem.start, sizeof(struct mpc52xx_fec), DRIVER_NAME))
+		return -EBUSY;
 
 	/* Init ether ndev with what we have */
 	ndev->netdev_ops	= &mpc52xx_fec_netdev_ops;
@@ -905,7 +901,7 @@ mpc52xx_fec_probe(struct of_device *op, const struct of_device_id *match)
 
 	if (!priv->fec) {
 		rv = -ENOMEM;
-		goto err_mem_region;
+		goto probe_error;
 	}
 
 	/* Bestcomm init */
@@ -918,7 +914,7 @@ mpc52xx_fec_probe(struct of_device *op, const struct of_device_id *match)
 	if (!priv->rx_dmatsk || !priv->tx_dmatsk) {
 		printk(KERN_ERR DRIVER_NAME ": Can not init SDMA tasks\n" );
 		rv = -ENOMEM;
-		goto err_rx_tx_dmatsk;
+		goto probe_error;
 	}
 
 	/* Get the IRQ we need one by one */
@@ -970,25 +966,33 @@ mpc52xx_fec_probe(struct of_device *op, const struct of_device_id *match)
 
 	rv = register_netdev(ndev);
 	if (rv < 0)
-		goto err_node;
+		goto probe_error;
 
 	/* We're done ! */
 	dev_set_drvdata(&op->dev, ndev);
 
 	return 0;
 
-err_node:
-	of_node_put(priv->phy_node);
+
+	/* Error handling - free everything that might be allocated */
+probe_error:
+
+	if (priv->phy_node)
+		of_node_put(priv->phy_node);
+	priv->phy_node = NULL;
+
 	irq_dispose_mapping(ndev->irq);
-err_rx_tx_dmatsk:
+
 	if (priv->rx_dmatsk)
 		bcom_fec_rx_release(priv->rx_dmatsk);
 	if (priv->tx_dmatsk)
 		bcom_fec_tx_release(priv->tx_dmatsk);
-	iounmap(priv->fec);
-err_mem_region:
+
+	if (priv->fec)
+		iounmap(priv->fec);
+
 	release_mem_region(mem.start, sizeof(struct mpc52xx_fec));
-err_netdev:
+
 	free_netdev(ndev);
 
 	return rv;

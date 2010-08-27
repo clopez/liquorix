@@ -282,7 +282,7 @@ static inline struct sock *unix_find_socket_byname(struct net *net,
 	return s;
 }
 
-static struct sock *unix_find_socket_byinode(struct inode *i)
+static struct sock *unix_find_socket_byinode(struct net *net, struct inode *i)
 {
 	struct sock *s;
 	struct hlist_node *node;
@@ -291,6 +291,9 @@ static struct sock *unix_find_socket_byinode(struct inode *i)
 	sk_for_each(s, node,
 		    &unix_socket_table[i->i_ino & (UNIX_HASH_SIZE - 1)]) {
 		struct dentry *dentry = unix_sk(s)->dentry;
+
+		if (!net_eq(sock_net(s), net))
+			continue;
 
 		if (dentry && dentry->d_inode == i) {
 			sock_hold(s);
@@ -447,31 +450,11 @@ static int unix_release_sock(struct sock *sk, int embrion)
 	return 0;
 }
 
-static void init_peercred(struct sock *sk)
-{
-	put_pid(sk->sk_peer_pid);
-	if (sk->sk_peer_cred)
-		put_cred(sk->sk_peer_cred);
-	sk->sk_peer_pid  = get_pid(task_tgid(current));
-	sk->sk_peer_cred = get_current_cred();
-}
-
-static void copy_peercred(struct sock *sk, struct sock *peersk)
-{
-	put_pid(sk->sk_peer_pid);
-	if (sk->sk_peer_cred)
-		put_cred(sk->sk_peer_cred);
-	sk->sk_peer_pid  = get_pid(peersk->sk_peer_pid);
-	sk->sk_peer_cred = get_cred(peersk->sk_peer_cred);
-}
-
 static int unix_listen(struct socket *sock, int backlog)
 {
 	int err;
 	struct sock *sk = sock->sk;
 	struct unix_sock *u = unix_sk(sk);
-	struct pid *old_pid = NULL;
-	const struct cred *old_cred = NULL;
 
 	err = -EOPNOTSUPP;
 	if (sock->type != SOCK_STREAM && sock->type != SOCK_SEQPACKET)
@@ -487,14 +470,12 @@ static int unix_listen(struct socket *sock, int backlog)
 	sk->sk_max_ack_backlog	= backlog;
 	sk->sk_state		= TCP_LISTEN;
 	/* set credentials so connect can copy them */
-	init_peercred(sk);
+	sk->sk_peercred.pid	= task_tgid_vnr(current);
+	current_euid_egid(&sk->sk_peercred.uid, &sk->sk_peercred.gid);
 	err = 0;
 
 out_unlock:
 	unix_state_unlock(sk);
-	put_pid(old_pid);
-	if (old_cred)
-		put_cred(old_cred);
 out:
 	return err;
 }
@@ -755,7 +736,7 @@ static struct sock *unix_find_other(struct net *net,
 		err = -ECONNREFUSED;
 		if (!S_ISSOCK(inode->i_mode))
 			goto put_fail;
-		u = unix_find_socket_byinode(inode);
+		u = unix_find_socket_byinode(net, inode);
 		if (!u)
 			goto put_fail;
 
@@ -1159,7 +1140,8 @@ restart:
 	unix_peer(newsk)	= sk;
 	newsk->sk_state		= TCP_ESTABLISHED;
 	newsk->sk_type		= sk->sk_type;
-	init_peercred(newsk);
+	newsk->sk_peercred.pid	= task_tgid_vnr(current);
+	current_euid_egid(&newsk->sk_peercred.uid, &newsk->sk_peercred.gid);
 	newu = unix_sk(newsk);
 	newsk->sk_wq		= &newu->peer_wq;
 	otheru = unix_sk(other);
@@ -1175,7 +1157,7 @@ restart:
 	}
 
 	/* Set credentials */
-	copy_peercred(sk, other);
+	sk->sk_peercred = other->sk_peercred;
 
 	sock->state	= SS_CONNECTED;
 	sk->sk_state	= TCP_ESTABLISHED;
@@ -1217,8 +1199,10 @@ static int unix_socketpair(struct socket *socka, struct socket *sockb)
 	sock_hold(skb);
 	unix_peer(ska) = skb;
 	unix_peer(skb) = ska;
-	init_peercred(ska);
-	init_peercred(skb);
+	ska->sk_peercred.pid = skb->sk_peercred.pid = task_tgid_vnr(current);
+	current_euid_egid(&skb->sk_peercred.uid, &skb->sk_peercred.gid);
+	ska->sk_peercred.uid = skb->sk_peercred.uid;
+	ska->sk_peercred.gid = skb->sk_peercred.gid;
 
 	if (ska->sk_type != SOCK_DGRAM) {
 		ska->sk_state = TCP_ESTABLISHED;
@@ -1313,20 +1297,18 @@ static void unix_detach_fds(struct scm_cookie *scm, struct sk_buff *skb)
 	int i;
 
 	scm->fp = UNIXCB(skb).fp;
+	skb->destructor = sock_wfree;
 	UNIXCB(skb).fp = NULL;
 
 	for (i = scm->fp->count-1; i >= 0; i--)
 		unix_notinflight(scm->fp->fp[i]);
 }
 
-static void unix_destruct_scm(struct sk_buff *skb)
+static void unix_destruct_fds(struct sk_buff *skb)
 {
 	struct scm_cookie scm;
 	memset(&scm, 0, sizeof(scm));
-	scm.pid  = UNIXCB(skb).pid;
-	scm.cred = UNIXCB(skb).cred;
-	if (UNIXCB(skb).fp)
-		unix_detach_fds(&scm, skb);
+	unix_detach_fds(&scm, skb);
 
 	/* Alas, it calls VFS */
 	/* So fscking what? fput() had been SMP-safe since the last Summer */
@@ -1349,20 +1331,8 @@ static int unix_attach_fds(struct scm_cookie *scm, struct sk_buff *skb)
 
 	for (i = scm->fp->count-1; i >= 0; i--)
 		unix_inflight(scm->fp->fp[i]);
+	skb->destructor = unix_destruct_fds;
 	return 0;
-}
-
-static int unix_scm_to_skb(struct scm_cookie *scm, struct sk_buff *skb, bool send_fds)
-{
-	int err = 0;
-	UNIXCB(skb).pid  = get_pid(scm->pid);
-	UNIXCB(skb).cred = get_cred(scm->cred);
-	UNIXCB(skb).fp = NULL;
-	if (scm->fp && send_fds)
-		err = unix_attach_fds(scm, skb);
-
-	skb->destructor = unix_destruct_scm;
-	return err;
 }
 
 /*
@@ -1421,9 +1391,12 @@ static int unix_dgram_sendmsg(struct kiocb *kiocb, struct socket *sock,
 	if (skb == NULL)
 		goto out;
 
-	err = unix_scm_to_skb(siocb->scm, skb, true);
-	if (err)
-		goto out_free;
+	memcpy(UNIXCREDS(skb), &siocb->scm->creds, sizeof(struct ucred));
+	if (siocb->scm->fp) {
+		err = unix_attach_fds(siocb->scm, skb);
+		if (err)
+			goto out_free;
+	}
 	unix_get_secdata(siocb->scm, skb);
 
 	skb_reset_transport_header(skb);
@@ -1593,14 +1566,16 @@ static int unix_stream_sendmsg(struct kiocb *kiocb, struct socket *sock,
 		 */
 		size = min_t(int, size, skb_tailroom(skb));
 
-
+		memcpy(UNIXCREDS(skb), &siocb->scm->creds, sizeof(struct ucred));
 		/* Only send the fds in the first buffer */
-		err = unix_scm_to_skb(siocb->scm, skb, !fds_sent);
-		if (err) {
-			kfree_skb(skb);
-			goto out_err;
+		if (siocb->scm->fp && !fds_sent) {
+			err = unix_attach_fds(siocb->scm, skb);
+			if (err) {
+				kfree_skb(skb);
+				goto out_err;
+			}
+			fds_sent = true;
 		}
-		fds_sent = true;
 
 		err = memcpy_fromiovec(skb_put(skb, size), msg->msg_iov, size);
 		if (err) {
@@ -1717,7 +1692,7 @@ static int unix_dgram_recvmsg(struct kiocb *iocb, struct socket *sock,
 		siocb->scm = &tmp_scm;
 		memset(&tmp_scm, 0, sizeof(tmp_scm));
 	}
-	scm_set_cred(siocb->scm, UNIXCB(skb).pid, UNIXCB(skb).cred);
+	siocb->scm->creds = *UNIXCREDS(skb);
 	unix_set_secdata(siocb->scm, skb);
 
 	if (!(flags & MSG_PEEK)) {
@@ -1866,14 +1841,14 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 
 		if (check_creds) {
 			/* Never glue messages from different writers */
-			if ((UNIXCB(skb).pid  != siocb->scm->pid) ||
-			    (UNIXCB(skb).cred != siocb->scm->cred)) {
+			if (memcmp(UNIXCREDS(skb), &siocb->scm->creds,
+				   sizeof(siocb->scm->creds)) != 0) {
 				skb_queue_head(&sk->sk_receive_queue, skb);
 				break;
 			}
 		} else {
 			/* Copy credentials */
-			scm_set_cred(siocb->scm, UNIXCB(skb).pid, UNIXCB(skb).cred);
+			siocb->scm->creds = *UNIXCREDS(skb);
 			check_creds = 1;
 		}
 
@@ -1906,7 +1881,7 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 				break;
 			}
 
-			consume_skb(skb);
+			kfree_skb(skb);
 
 			if (siocb->scm->fp)
 				break;

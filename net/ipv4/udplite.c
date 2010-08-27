@@ -58,7 +58,6 @@ struct proto 	udplite_prot = {
 	.compat_getsockopt = compat_udp_getsockopt,
 #endif
 };
-EXPORT_SYMBOL(udplite_prot);
 
 static struct inet_protosw udplite4_protosw = {
 	.type		=  SOCK_DGRAM,
@@ -128,3 +127,5 @@ out_unregister_proto:
 out_register_err:
 	printk(KERN_CRIT "%s: Cannot add UDP-Lite protocol.\n", __func__);
 }
+
+EXPORT_SYMBOL(udplite_prot);

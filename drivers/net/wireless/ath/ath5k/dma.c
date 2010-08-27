@@ -48,6 +48,7 @@
  */
 void ath5k_hw_start_rx_dma(struct ath5k_hw *ah)
 {
+	ATH5K_TRACE(ah->ah_sc);
 	ath5k_hw_reg_write(ah, AR5K_CR_RXE, AR5K_CR);
 	ath5k_hw_reg_read(ah, AR5K_CR);
 }
@@ -61,6 +62,7 @@ int ath5k_hw_stop_rx_dma(struct ath5k_hw *ah)
 {
 	unsigned int i;
 
+	ATH5K_TRACE(ah->ah_sc);
 	ath5k_hw_reg_write(ah, AR5K_CR_RXD, AR5K_CR);
 
 	/*
@@ -94,6 +96,8 @@ u32 ath5k_hw_get_rxdp(struct ath5k_hw *ah)
  */
 void ath5k_hw_set_rxdp(struct ath5k_hw *ah, u32 phys_addr)
 {
+	ATH5K_TRACE(ah->ah_sc);
+
 	ath5k_hw_reg_write(ah, phys_addr, AR5K_RXDP);
 }
 
@@ -121,6 +125,7 @@ int ath5k_hw_start_tx_dma(struct ath5k_hw *ah, unsigned int queue)
 {
 	u32 tx_queue;
 
+	ATH5K_TRACE(ah->ah_sc);
 	AR5K_ASSERT_ENTRY(queue, ah->ah_capabilities.cap_queues.q_tx_num);
 
 	/* Return if queue is declared inactive */
@@ -181,6 +186,7 @@ int ath5k_hw_stop_tx_dma(struct ath5k_hw *ah, unsigned int queue)
 	unsigned int i = 40;
 	u32 tx_queue, pending;
 
+	ATH5K_TRACE(ah->ah_sc);
 	AR5K_ASSERT_ENTRY(queue, ah->ah_capabilities.cap_queues.q_tx_num);
 
 	/* Return if queue is declared inactive */
@@ -291,6 +297,7 @@ u32 ath5k_hw_get_txdp(struct ath5k_hw *ah, unsigned int queue)
 {
 	u16 tx_reg;
 
+	ATH5K_TRACE(ah->ah_sc);
 	AR5K_ASSERT_ENTRY(queue, ah->ah_capabilities.cap_queues.q_tx_num);
 
 	/*
@@ -333,6 +340,7 @@ int ath5k_hw_set_txdp(struct ath5k_hw *ah, unsigned int queue, u32 phys_addr)
 {
 	u16 tx_reg;
 
+	ATH5K_TRACE(ah->ah_sc);
 	AR5K_ASSERT_ENTRY(queue, ah->ah_capabilities.cap_queues.q_tx_num);
 
 	/*
@@ -392,6 +400,8 @@ int ath5k_hw_update_tx_triglevel(struct ath5k_hw *ah, bool increase)
 	u32 trigger_level, imr;
 	int ret = -EIO;
 
+	ATH5K_TRACE(ah->ah_sc);
+
 	/*
 	 * Disable interrupts by setting the mask
 	 */
@@ -441,6 +451,7 @@ done:
  */
 bool ath5k_hw_is_intr_pending(struct ath5k_hw *ah)
 {
+	ATH5K_TRACE(ah->ah_sc);
 	return ath5k_hw_reg_read(ah, AR5K_INTPEND) == 1 ? 1 : 0;
 }
 
@@ -463,6 +474,8 @@ bool ath5k_hw_is_intr_pending(struct ath5k_hw *ah)
 int ath5k_hw_get_isr(struct ath5k_hw *ah, enum ath5k_int *interrupt_mask)
 {
 	u32 data;
+
+	ATH5K_TRACE(ah->ah_sc);
 
 	/*
 	 * Read interrupt status from the Interrupt Status register

@@ -25,13 +25,9 @@
 
 struct vic_provinfo *vic_provinfo_alloc(gfp_t flags, u8 *oui, u8 type)
 {
-	struct vic_provinfo *vp;
+	struct vic_provinfo *vp = kzalloc(VIC_PROVINFO_MAX_DATA, flags);
 
-	if (!oui)
-		return NULL;
-
-	vp = kzalloc(VIC_PROVINFO_MAX_DATA, flags);
-	if (!vp)
+	if (!vp || !oui)
 		return NULL;
 
 	memcpy(vp->oui, oui, sizeof(vp->oui));

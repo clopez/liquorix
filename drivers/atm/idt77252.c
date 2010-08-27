@@ -3364,7 +3364,7 @@ init_card(struct atm_dev *dev)
 		writel(SAR_STAT_TMROF, SAR_REG_STAT);
 	}
 	IPRINTK("%s: Request IRQ ... ", card->name);
-	if (request_irq(pcidev->irq, idt77252_interrupt, IRQF_SHARED,
+	if (request_irq(pcidev->irq, idt77252_interrupt, IRQF_DISABLED|IRQF_SHARED,
 			card->name, card) != 0) {
 		printk("%s: can't allocate IRQ.\n", card->name);
 		deinit_card(card);
@@ -3779,7 +3779,8 @@ err_out_disable_pdev:
 
 static struct pci_device_id idt77252_pci_tbl[] =
 {
-	{ PCI_VDEVICE(IDT, PCI_DEVICE_ID_IDT_IDT77252), 0 },
+	{ PCI_VENDOR_ID_IDT, PCI_DEVICE_ID_IDT_IDT77252,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
 	{ 0, }
 };
 

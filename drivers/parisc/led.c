@@ -357,13 +357,12 @@ static __inline__ int led_get_net_activity(void)
 	rcu_read_lock();
 	for_each_netdev_rcu(&init_net, dev) {
 	    const struct net_device_stats *stats;
-	    struct rtnl_link_stats64 temp;
 	    struct in_device *in_dev = __in_dev_get_rcu(dev);
 	    if (!in_dev || !in_dev->ifa_list)
 		continue;
 	    if (ipv4_is_loopback(in_dev->ifa_list->ifa_local))
 		continue;
-	    stats = dev_get_stats(dev, &temp);
+	    stats = dev_get_stats(dev);
 	    rx_total += stats->rx_packets;
 	    tx_total += stats->tx_packets;
 	}

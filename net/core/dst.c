@@ -197,6 +197,7 @@ static void ___dst_free(struct dst_entry *dst)
 		dst->input = dst->output = dst_discard;
 	dst->obsolete = 2;
 }
+EXPORT_SYMBOL(__dst_free);
 
 void __dst_free(struct dst_entry *dst)
 {
@@ -212,7 +213,6 @@ void __dst_free(struct dst_entry *dst)
 	}
 	spin_unlock_bh(&dst_garbage.lock);
 }
-EXPORT_SYMBOL(__dst_free);
 
 struct dst_entry *dst_destroy(struct dst_entry * dst)
 {

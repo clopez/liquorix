@@ -4266,16 +4266,14 @@ static u8 bnx2x_ext_phy_init(struct link_params *params, struct link_vars *vars)
 					       MDIO_PMA_REG_10G_CTRL2, 0x0008);
 			}
 
-			/* Set 2-wire transfer rate of SFP+ module EEPROM
-			 * to 100Khz since some DACs(direct attached cables) do
-			 * not work at 400Khz.
-			 */
+			/* Set 2-wire transfer rate to 400Khz since 100Khz
+			is not operational */
 			bnx2x_cl45_write(bp, params->port,
 				       ext_phy_type,
 				       ext_phy_addr,
 				       MDIO_PMA_DEVAD,
 				       MDIO_PMA_REG_8727_TWO_WIRE_SLAVE_ADDR,
-				       0xa001);
+				       0xa101);
 
 			/* Set TX PreEmphasis if needed */
 			if ((params->feature_config_flags &

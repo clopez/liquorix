@@ -116,7 +116,6 @@
 #if defined(CONFIG_ATM_CLIP) || defined(CONFIG_ATM_CLIP_MODULE)
 #include <net/atmclip.h>
 struct neigh_table *clip_tbl_hook;
-EXPORT_SYMBOL(clip_tbl_hook);
 #endif
 
 #include <asm/system.h>
@@ -170,7 +169,6 @@ const struct neigh_ops arp_broken_ops = {
 	.hh_output =		dev_queue_xmit,
 	.queue_xmit =		dev_queue_xmit,
 };
-EXPORT_SYMBOL(arp_broken_ops);
 
 struct neigh_table arp_tbl = {
 	.family =	AF_INET,
@@ -200,7 +198,6 @@ struct neigh_table arp_tbl = {
 	.gc_thresh2 =	512,
 	.gc_thresh3 =	1024,
 };
-EXPORT_SYMBOL(arp_tbl);
 
 int arp_mc_map(__be32 addr, u8 *haddr, struct net_device *dev, int dir)
 {
@@ -336,14 +333,11 @@ static void arp_solicit(struct neighbour *neigh, struct sk_buff *skb)
 	struct net_device *dev = neigh->dev;
 	__be32 target = *(__be32*)neigh->primary_key;
 	int probes = atomic_read(&neigh->probes);
-	struct in_device *in_dev;
+	struct in_device *in_dev = in_dev_get(dev);
 
-	rcu_read_lock();
-	in_dev = __in_dev_get_rcu(dev);
-	if (!in_dev) {
-		rcu_read_unlock();
+	if (!in_dev)
 		return;
-	}
+
 	switch (IN_DEV_ARP_ANNOUNCE(in_dev)) {
 	default:
 	case 0:		/* By default announce any local IP */
@@ -364,8 +358,9 @@ static void arp_solicit(struct neighbour *neigh, struct sk_buff *skb)
 	case 2:		/* Avoid secondary IPs, get a primary/preferred one */
 		break;
 	}
-	rcu_read_unlock();
 
+	if (in_dev)
+		in_dev_put(in_dev);
 	if (!saddr)
 		saddr = inet_select_addr(dev, target, RT_SCOPE_LINK);
 
@@ -432,7 +427,7 @@ static int arp_filter(__be32 sip, __be32 tip, struct net_device *dev)
 
 	if (ip_route_output_key(net, &rt, &fl) < 0)
 		return 1;
-	if (rt->dst.dev != dev) {
+	if (rt->u.dst.dev != dev) {
 		NET_INC_STATS_BH(net, LINUX_MIB_ARPFILTER);
 		flag = 1;
 	}
@@ -502,7 +497,6 @@ int arp_find(unsigned char *haddr, struct sk_buff *skb)
 		kfree_skb(skb);
 	return 1;
 }
-EXPORT_SYMBOL(arp_find);
 
 /* END OF OBSOLETE FUNCTIONS */
 
@@ -538,7 +532,7 @@ static inline int arp_fwd_proxy(struct in_device *in_dev,
 	struct in_device *out_dev;
 	int imi, omi = -1;
 
-	if (rt->dst.dev == dev)
+	if (rt->u.dst.dev == dev)
 		return 0;
 
 	if (!IN_DEV_PROXY_ARP(in_dev))
@@ -551,10 +545,10 @@ static inline int arp_fwd_proxy(struct in_device *in_dev,
 
 	/* place to check for proxy_arp for routes */
 
-	out_dev = __in_dev_get_rcu(rt->dst.dev);
-	if (out_dev)
+	if ((out_dev = in_dev_get(rt->u.dst.dev)) != NULL) {
 		omi = IN_DEV_MEDIUM_ID(out_dev);
-
+		in_dev_put(out_dev);
+	}
 	return (omi != imi && omi != -1);
 }
 
@@ -582,7 +576,7 @@ static inline int arp_fwd_pvlan(struct in_device *in_dev,
 				__be32 sip, __be32 tip)
 {
 	/* Private VLAN is only concerned about the same ethernet segment */
-	if (rt->dst.dev != dev)
+	if (rt->u.dst.dev != dev)
 		return 0;
 
 	/* Don't reply on self probes (often done by windowz boxes)*/
@@ -704,7 +698,6 @@ out:
 	kfree_skb(skb);
 	return NULL;
 }
-EXPORT_SYMBOL(arp_create);
 
 /*
  *	Send an arp packet.
@@ -714,7 +707,6 @@ void arp_xmit(struct sk_buff *skb)
 	/* Send it off, maybe filter it using firewalling first.  */
 	NF_HOOK(NFPROTO_ARP, NF_ARP_OUT, skb, NULL, skb->dev, dev_queue_xmit);
 }
-EXPORT_SYMBOL(arp_xmit);
 
 /*
  *	Create and send an arp packet.
@@ -741,7 +733,6 @@ void arp_send(int type, int ptype, __be32 dest_ip,
 
 	arp_xmit(skb);
 }
-EXPORT_SYMBOL(arp_send);
 
 /*
  *	Process an arp request.
@@ -750,7 +741,7 @@ EXPORT_SYMBOL(arp_send);
 static int arp_process(struct sk_buff *skb)
 {
 	struct net_device *dev = skb->dev;
-	struct in_device *in_dev = __in_dev_get_rcu(dev);
+	struct in_device *in_dev = in_dev_get(dev);
 	struct arphdr *arp;
 	unsigned char *arp_ptr;
 	struct rtable *rt;
@@ -899,6 +890,7 @@ static int arp_process(struct sk_buff *skb)
 					arp_send(ARPOP_REPLY,ETH_P_ARP,sip,dev,tip,sha,dev->dev_addr,sha);
 				} else {
 					pneigh_enqueue(&arp_tbl, in_dev->arp_parms, skb);
+					in_dev_put(in_dev);
 					return 0;
 				}
 				goto out;
@@ -944,6 +936,8 @@ static int arp_process(struct sk_buff *skb)
 	}
 
 out:
+	if (in_dev)
+		in_dev_put(in_dev);
 	consume_skb(skb);
 	return 0;
 }
@@ -1051,7 +1045,7 @@ static int arp_req_set(struct net *net, struct arpreq *r,
 		struct rtable * rt;
 		if ((err = ip_route_output_key(net, &rt, &fl)) != 0)
 			return err;
-		dev = rt->dst.dev;
+		dev = rt->u.dst.dev;
 		ip_rt_put(rt);
 		if (!dev)
 			return -EINVAL;
@@ -1158,7 +1152,7 @@ static int arp_req_delete(struct net *net, struct arpreq *r,
 		struct rtable * rt;
 		if ((err = ip_route_output_key(net, &rt, &fl)) != 0)
 			return err;
-		dev = rt->dst.dev;
+		dev = rt->u.dst.dev;
 		ip_rt_put(rt);
 		if (!dev)
 			return -EINVAL;
@@ -1459,3 +1453,14 @@ static int __init arp_proc_init(void)
 }
 
 #endif /* CONFIG_PROC_FS */
+
+EXPORT_SYMBOL(arp_broken_ops);
+EXPORT_SYMBOL(arp_find);
+EXPORT_SYMBOL(arp_create);
+EXPORT_SYMBOL(arp_xmit);
+EXPORT_SYMBOL(arp_send);
+EXPORT_SYMBOL(arp_tbl);
+
+#if defined(CONFIG_ATM_CLIP) || defined(CONFIG_ATM_CLIP_MODULE)
+EXPORT_SYMBOL(clip_tbl_hook);
+#endif

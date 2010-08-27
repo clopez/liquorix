@@ -81,8 +81,7 @@ int falcon_reset_xaui(struct efx_nic *efx)
 		}
 		udelay(10);
 	}
-	netif_err(efx, hw, efx->net_dev,
-		  "timed out waiting for XAUI/XGXS reset\n");
+	EFX_ERR(efx, "timed out waiting for XAUI/XGXS reset\n");
 	return -ETIMEDOUT;
 }
 
@@ -257,7 +256,7 @@ static bool falcon_xmac_link_ok_retry(struct efx_nic *efx, int tries)
 	falcon_stop_nic_stats(efx);
 
 	while (!mac_up && tries) {
-		netif_dbg(efx, hw, efx->net_dev, "bashing xaui\n");
+		EFX_LOG(efx, "bashing xaui\n");
 		falcon_reset_xaui(efx);
 		udelay(200);
 

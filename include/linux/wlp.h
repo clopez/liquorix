@@ -300,7 +300,7 @@ struct wlp_ie {
 	__le16 cycle_param;
 	__le16 acw_anchor_addr;
 	u8 wssid_hash_list[];
-} __packed;
+} __attribute__((packed));
 
 static inline int wlp_ie_hash_length(struct wlp_ie *ie)
 {
@@ -324,7 +324,7 @@ static inline void wlp_ie_set_hash_length(struct wlp_ie *ie, int hash_length)
  */
 struct wlp_nonce {
 	u8 data[16];
-} __packed;
+} __attribute__((packed));
 
 /**
  * WLP UUID
@@ -336,7 +336,7 @@ struct wlp_nonce {
  */
 struct wlp_uuid {
 	u8 data[16];
-} __packed;
+} __attribute__((packed));
 
 
 /**
@@ -348,7 +348,7 @@ struct wlp_dev_type {
 	u8 OUI[3];
 	u8 OUIsubdiv;
 	__le16 subID;
-} __packed;
+} __attribute__((packed));
 
 /**
  * WLP frame header
@@ -357,7 +357,7 @@ struct wlp_dev_type {
 struct wlp_frame_hdr {
 	__le16 mux_hdr;			/* WLP_PROTOCOL_ID */
 	enum wlp_frame_type type:8;
-} __packed;
+} __attribute__((packed));
 
 /**
  * WLP attribute field header
@@ -368,7 +368,7 @@ struct wlp_frame_hdr {
 struct wlp_attr_hdr {
 	__le16 type;
 	__le16 length;
-} __packed;
+} __attribute__((packed));
 
 /**
  * Device information commonly used together
@@ -401,13 +401,13 @@ struct wlp_device_info {
 struct wlp_attr_##name {						\
 	struct wlp_attr_hdr hdr;					\
 	type name;							\
-} __packed;
+} __attribute__((packed));
 
 #define wlp_attr_array(type, name)					\
 struct wlp_attr_##name {						\
 	struct wlp_attr_hdr hdr;					\
 	type name[];							\
-} __packed;
+} __attribute__((packed));
 
 /**
  * WLP association attribute fields
@@ -483,7 +483,7 @@ struct wlp_wss_info {
 	struct wlp_attr_accept_enrl accept;
 	struct wlp_attr_wss_sec_status sec_stat;
 	struct wlp_attr_wss_bcast bcast;
-} __packed;
+} __attribute__((packed));
 
 /* WLP WSS Information */
 wlp_attr_array(struct wlp_wss_info, wss_info)
@@ -520,7 +520,7 @@ wlp_attr(u8, wlp_assc_err)
 struct wlp_frame_std_abbrv_hdr {
 	struct wlp_frame_hdr hdr;
 	u8 tag;
-} __packed;
+} __attribute__((packed));
 
 /**
  * WLP association frames
@@ -533,7 +533,7 @@ struct wlp_frame_assoc {
 	struct wlp_attr_version version;
 	struct wlp_attr_msg_type msg_type;
 	u8 attr[];
-} __packed;
+} __attribute__((packed));
 
 /* Ethernet to dev address mapping */
 struct wlp_eda {

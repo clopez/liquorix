@@ -63,8 +63,7 @@ static int efx_mdio_check_mmd(struct efx_nic *efx, int mmd, int fault_fatal)
 		/* Read MMD STATUS2 to check it is responding. */
 		status = efx_mdio_read(efx, mmd, MDIO_STAT2);
 		if ((status & MDIO_STAT2_DEVPRST) != MDIO_STAT2_DEVPRST_VAL) {
-			netif_err(efx, hw, efx->net_dev,
-				  "PHY MMD %d not responding.\n", mmd);
+			EFX_ERR(efx, "PHY MMD %d not responding.\n", mmd);
 			return -EIO;
 		}
 	}
@@ -73,14 +72,12 @@ static int efx_mdio_check_mmd(struct efx_nic *efx, int mmd, int fault_fatal)
 	status = efx_mdio_read(efx, mmd, MDIO_STAT1);
 	if (status & MDIO_STAT1_FAULT) {
 		if (fault_fatal) {
-			netif_err(efx, hw, efx->net_dev,
-				  "PHY MMD %d reporting fatal"
-				  " fault: status %x\n", mmd, status);
+			EFX_ERR(efx, "PHY MMD %d reporting fatal"
+				" fault: status %x\n", mmd, status);
 			return -EIO;
 		} else {
-			netif_dbg(efx, hw, efx->net_dev,
-				  "PHY MMD %d reporting status"
-				  " %x (expected)\n", mmd, status);
+			EFX_LOG(efx, "PHY MMD %d reporting status"
+				" %x (expected)\n", mmd, status);
 		}
 	}
 	return 0;
@@ -106,9 +103,8 @@ int efx_mdio_wait_reset_mmds(struct efx_nic *efx, unsigned int mmd_mask)
 			if (mask & 1) {
 				stat = efx_mdio_read(efx, mmd, MDIO_CTRL1);
 				if (stat < 0) {
-					netif_err(efx, hw, efx->net_dev,
-						  "failed to read status of"
-						  " MMD %d\n", mmd);
+					EFX_ERR(efx, "failed to read status of"
+						" MMD %d\n", mmd);
 					return -EIO;
 				}
 				if (stat & MDIO_CTRL1_RESET)
@@ -123,9 +119,8 @@ int efx_mdio_wait_reset_mmds(struct efx_nic *efx, unsigned int mmd_mask)
 		msleep(spintime);
 	}
 	if (in_reset != 0) {
-		netif_err(efx, hw, efx->net_dev,
-			  "not all MMDs came out of reset in time."
-			  " MMDs still in reset: %x\n", in_reset);
+		EFX_ERR(efx, "not all MMDs came out of reset in time."
+			" MMDs still in reset: %x\n", in_reset);
 		rc = -ETIMEDOUT;
 	}
 	return rc;
@@ -147,18 +142,16 @@ int efx_mdio_check_mmds(struct efx_nic *efx,
 	devs1 = efx_mdio_read(efx, probe_mmd, MDIO_DEVS1);
 	devs2 = efx_mdio_read(efx, probe_mmd, MDIO_DEVS2);
 	if (devs1 < 0 || devs2 < 0) {
-		netif_err(efx, hw, efx->net_dev,
-			  "failed to read devices present\n");
+		EFX_ERR(efx, "failed to read devices present\n");
 		return -EIO;
 	}
 	devices = devs1 | (devs2 << 16);
 	if ((devices & mmd_mask) != mmd_mask) {
-		netif_err(efx, hw, efx->net_dev,
-			  "required MMDs not present: got %x, wanted %x\n",
-			  devices, mmd_mask);
+		EFX_ERR(efx, "required MMDs not present: got %x, "
+			"wanted %x\n", devices, mmd_mask);
 		return -ENODEV;
 	}
-	netif_vdbg(efx, hw, efx->net_dev, "Devices present: %x\n", devices);
+	EFX_TRACE(efx, "Devices present: %x\n", devices);
 
 	/* Check all required MMDs are responding and happy. */
 	while (mmd_mask) {
@@ -226,7 +219,7 @@ static void efx_mdio_set_mmd_lpower(struct efx_nic *efx,
 {
 	int stat = efx_mdio_read(efx, mmd, MDIO_STAT1);
 
-	netif_vdbg(efx, drv, efx->net_dev, "Setting low power mode for MMD %d to %d\n",
+	EFX_TRACE(efx, "Setting low power mode for MMD %d to %d\n",
 		  mmd, lpower);
 
 	if (stat & MDIO_STAT1_LPOWERABLE) {
@@ -356,8 +349,8 @@ int efx_mdio_test_alive(struct efx_nic *efx)
 
 	if ((physid1 == 0x0000) || (physid1 == 0xffff) ||
 	    (physid2 == 0x0000) || (physid2 == 0xffff)) {
-		netif_err(efx, hw, efx->net_dev,
-			  "no MDIO PHY present with ID %d\n", efx->mdio.prtad);
+		EFX_ERR(efx, "no MDIO PHY present with ID %d\n",
+			efx->mdio.prtad);
 		rc = -EINVAL;
 	} else {
 		rc = efx_mdio_check_mmds(efx, efx->mdio.mmds, 0);

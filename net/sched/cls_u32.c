@@ -134,12 +134,10 @@ next_knode:
 #endif
 
 		for (i = n->sel.nkeys; i>0; i--, key++) {
-			int toff = off + key->off + (off2 & key->offmask);
+			unsigned int toff;
 			__be32 *data, _data;
 
-			if (skb_headroom(skb) + toff < 0)
-				goto out;
-
+			toff = off + key->off + (off2 & key->offmask);
 			data = skb_header_pointer(skb, toff, 4, &_data);
 			if (!data)
 				goto out;

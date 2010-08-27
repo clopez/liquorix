@@ -112,42 +112,15 @@ void qlcnic_release_rx_buffers(struct qlcnic_adapter *adapter)
 		rds_ring = &recv_ctx->rds_rings[ring];
 		for (i = 0; i < rds_ring->num_desc; ++i) {
 			rx_buf = &(rds_ring->rx_buf_arr[i]);
-			if (rx_buf->skb == NULL)
+			if (rx_buf->state == QLCNIC_BUFFER_FREE)
 				continue;
-
 			pci_unmap_single(adapter->pdev,
 					rx_buf->dma,
 					rds_ring->dma_size,
 					PCI_DMA_FROMDEVICE);
-
-			dev_kfree_skb_any(rx_buf->skb);
+			if (rx_buf->skb != NULL)
+				dev_kfree_skb_any(rx_buf->skb);
 		}
-	}
-}
-
-void qlcnic_reset_rx_buffers_list(struct qlcnic_adapter *adapter)
-{
-	struct qlcnic_recv_context *recv_ctx;
-	struct qlcnic_host_rds_ring *rds_ring;
-	struct qlcnic_rx_buffer *rx_buf;
-	int i, ring;
-
-	recv_ctx = &adapter->recv_ctx;
-	for (ring = 0; ring < adapter->max_rds_rings; ring++) {
-		rds_ring = &recv_ctx->rds_rings[ring];
-
-		spin_lock(&rds_ring->lock);
-
-		INIT_LIST_HEAD(&rds_ring->free_list);
-
-		rx_buf = rds_ring->rx_buf_arr;
-		for (i = 0; i < rds_ring->num_desc; i++) {
-			list_add_tail(&rx_buf->list,
-					&rds_ring->free_list);
-			rx_buf++;
-		}
-
-		spin_unlock(&rds_ring->lock);
 	}
 }
 
@@ -208,9 +181,7 @@ skip_rds:
 
 	tx_ring = adapter->tx_ring;
 	vfree(tx_ring->cmd_buf_arr);
-	tx_ring->cmd_buf_arr = NULL;
 	kfree(adapter->tx_ring);
-	adapter->tx_ring = NULL;
 }
 
 int qlcnic_alloc_sw_resources(struct qlcnic_adapter *adapter)
@@ -293,6 +264,7 @@ int qlcnic_alloc_sw_resources(struct qlcnic_adapter *adapter)
 			list_add_tail(&rx_buf->list,
 					&rds_ring->free_list);
 			rx_buf->ref_handle = i;
+			rx_buf->state = QLCNIC_BUFFER_FREE;
 			rx_buf++;
 		}
 		spin_lock_init(&rds_ring->lock);
@@ -441,7 +413,7 @@ int qlcnic_pinit_from_rom(struct qlcnic_adapter *adapter)
 
 	/* resetall */
 	qlcnic_rom_lock(adapter);
-	QLCWR32(adapter, QLCNIC_ROMUSB_GLB_SW_RESET, 0xfeffffff);
+	QLCWR32(adapter, QLCNIC_ROMUSB_GLB_SW_RESET, 0xffffffff);
 	qlcnic_rom_unlock(adapter);
 
 	if (qlcnic_rom_fast_read(adapter, 0, &n) != 0 || (n != 0xcafecafe) ||
@@ -549,13 +521,16 @@ qlcnic_setup_idc_param(struct qlcnic_adapter *adapter) {
 	u32 val;
 
 	val = QLCRD32(adapter, QLCNIC_CRB_DEV_PARTITION_INFO);
-	val = QLC_DEV_GET_DRV(val, adapter->portnum);
-	if ((val & 0x3) != QLCNIC_TYPE_NIC) {
-		dev_err(&adapter->pdev->dev,
-			"Not an Ethernet NIC func=%u\n", val);
+	val = (val >> (adapter->portnum * 4)) & 0xf;
+
+	if ((val & 0x3) != 1) {
+		dev_err(&adapter->pdev->dev, "Not an Ethernet NIC func=%u\n",
+									val);
 		return -EIO;
 	}
+
 	adapter->physical_port = (val >> 2);
+
 	if (qlcnic_rom_fast_read(adapter, QLCNIC_ROM_DEV_INIT_TIMEOUT, &timeo))
 		timeo = 30;
 
@@ -569,33 +544,15 @@ qlcnic_setup_idc_param(struct qlcnic_adapter *adapter) {
 	return 0;
 }
 
-int
-qlcnic_check_flash_fw_ver(struct qlcnic_adapter *adapter)
-{
-	u32 ver = -1, min_ver;
-
-	qlcnic_rom_fast_read(adapter, QLCNIC_FW_VERSION_OFFSET, (int *)&ver);
-
-	ver = QLCNIC_DECODE_VERSION(ver);
-	min_ver = QLCNIC_MIN_FW_VERSION;
-
-	if (ver < min_ver) {
-		dev_err(&adapter->pdev->dev,
-			"firmware version %d.%d.%d unsupported."
-			"Min supported version %d.%d.%d\n",
-			_major(ver), _minor(ver), _build(ver),
-			_major(min_ver), _minor(min_ver), _build(min_ver));
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
 static int
 qlcnic_has_mn(struct qlcnic_adapter *adapter)
 {
-	u32 capability;
+	u32 capability, flashed_ver;
 	capability = 0;
+
+	qlcnic_rom_fast_read(adapter,
+			QLCNIC_FW_VERSION_OFFSET, (int *)&flashed_ver);
+	flashed_ver = QLCNIC_DECODE_VERSION(flashed_ver);
 
 	capability = QLCRD32(adapter, QLCNIC_PEG_TUNE_CAPABILITY);
 	if (capability & QLCNIC_PEG_TUNE_MN_PRESENT)
@@ -1050,7 +1007,7 @@ static int
 qlcnic_validate_firmware(struct qlcnic_adapter *adapter)
 {
 	__le32 val;
-	u32 ver, bios, min_size;
+	u32 ver, min_ver, bios, min_size;
 	struct pci_dev *pdev = adapter->pdev;
 	const struct firmware *fw = adapter->fw;
 	u8 fw_type = adapter->fw_type;
@@ -1072,9 +1029,12 @@ qlcnic_validate_firmware(struct qlcnic_adapter *adapter)
 		return -EINVAL;
 
 	val = qlcnic_get_fw_version(adapter);
+
+	min_ver = QLCNIC_VERSION_CODE(4, 0, 216);
+
 	ver = QLCNIC_DECODE_VERSION(val);
 
-	if (ver < QLCNIC_MIN_FW_VERSION) {
+	if ((_major(ver) > _QLCNIC_LINUX_MAJOR) || (ver < min_ver)) {
 		dev_err(&pdev->dev,
 				"%s: firmware version %d.%d.%d unsupported\n",
 		fw_name[fw_type], _major(ver), _minor(ver), _build(ver));
@@ -1162,7 +1122,7 @@ qlcnic_release_firmware(struct qlcnic_adapter *adapter)
 	adapter->fw = NULL;
 }
 
-static int qlcnic_cmd_peg_ready(struct qlcnic_adapter *adapter)
+int qlcnic_phantom_init(struct qlcnic_adapter *adapter)
 {
 	u32 val;
 	int retries = 60;
@@ -1187,8 +1147,7 @@ static int qlcnic_cmd_peg_ready(struct qlcnic_adapter *adapter)
 	QLCWR32(adapter, CRB_CMDPEG_STATE, PHAN_INITIALIZE_FAILED);
 
 out_err:
-	dev_err(&adapter->pdev->dev, "Command Peg initialization not "
-		      "complete, state: 0x%x.\n", val);
+	dev_err(&adapter->pdev->dev, "firmware init failed\n");
 	return -EIO;
 }
 
@@ -1220,10 +1179,6 @@ qlcnic_receive_peg_ready(struct qlcnic_adapter *adapter)
 int qlcnic_init_firmware(struct qlcnic_adapter *adapter)
 {
 	int err;
-
-	err = qlcnic_cmd_peg_ready(adapter);
-	if (err)
-		return err;
 
 	err = qlcnic_receive_peg_ready(adapter);
 	if (err)
@@ -1310,11 +1265,13 @@ qlcnic_alloc_rx_skb(struct qlcnic_adapter *adapter,
 	dma_addr_t dma;
 	struct pci_dev *pdev = adapter->pdev;
 
-	skb = dev_alloc_skb(rds_ring->skb_size);
-	if (!skb) {
+	buffer->skb = dev_alloc_skb(rds_ring->skb_size);
+	if (!buffer->skb) {
 		adapter->stats.skb_alloc_failure++;
 		return -ENOMEM;
 	}
+
+	skb = buffer->skb;
 
 	skb_reserve(skb, 2);
 
@@ -1324,11 +1281,13 @@ qlcnic_alloc_rx_skb(struct qlcnic_adapter *adapter,
 	if (pci_dma_mapping_error(pdev, dma)) {
 		adapter->stats.rx_dma_map_error++;
 		dev_kfree_skb_any(skb);
+		buffer->skb = NULL;
 		return -ENOMEM;
 	}
 
 	buffer->skb = skb;
 	buffer->dma = dma;
+	buffer->state = QLCNIC_BUFFER_BUSY;
 
 	return 0;
 }
@@ -1341,15 +1300,14 @@ static struct sk_buff *qlcnic_process_rxbuf(struct qlcnic_adapter *adapter,
 
 	buffer = &rds_ring->rx_buf_arr[index];
 
-	if (unlikely(buffer->skb == NULL)) {
-		WARN_ON(1);
-		return NULL;
-	}
-
 	pci_unmap_single(adapter->pdev, buffer->dma, rds_ring->dma_size,
 			PCI_DMA_FROMDEVICE);
 
 	skb = buffer->skb;
+	if (!skb) {
+		adapter->stats.null_skb++;
+		goto no_skb;
+	}
 
 	if (likely(adapter->rx_csum && cksum == STATUS_CKSUM_OK)) {
 		adapter->stats.csummed++;
@@ -1361,7 +1319,8 @@ static struct sk_buff *qlcnic_process_rxbuf(struct qlcnic_adapter *adapter,
 	skb->dev = adapter->netdev;
 
 	buffer->skb = NULL;
-
+no_skb:
+	buffer->state = QLCNIC_BUFFER_FREE;
 	return skb;
 }
 
@@ -1536,7 +1495,7 @@ qlcnic_process_rcv_ring(struct qlcnic_host_sds_ring *sds_ring, int max)
 
 		WARN_ON(desc_cnt > 1);
 
-		if (likely(rxbuf))
+		if (rxbuf)
 			list_add_tail(&rxbuf->list, &sds_ring->free_list[ring]);
 		else
 			adapter->stats.null_rxbuf++;
@@ -1741,25 +1700,4 @@ qlcnic_process_rcv_ring_diag(struct qlcnic_host_sds_ring *sds_ring)
 
 	sds_ring->consumer = consumer;
 	writel(consumer, sds_ring->crb_sts_consumer);
-}
-
-void
-qlcnic_fetch_mac(struct qlcnic_adapter *adapter, u32 off1, u32 off2,
-			u8 alt_mac, u8 *mac)
-{
-	u32 mac_low, mac_high;
-	int i;
-
-	mac_low = QLCRD32(adapter, off1);
-	mac_high = QLCRD32(adapter, off2);
-
-	if (alt_mac) {
-		mac_low |= (mac_low >> 16) | (mac_high << 16);
-		mac_high >>= 16;
-	}
-
-	for (i = 0; i < 2; i++)
-		mac[i] = (u8)(mac_high >> ((1 - i) * 8));
-	for (i = 2; i < 6; i++)
-		mac[i] = (u8)(mac_low >> ((5 - i) * 8));
 }

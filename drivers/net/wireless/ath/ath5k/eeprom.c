@@ -35,6 +35,7 @@ static int ath5k_hw_eeprom_read(struct ath5k_hw *ah, u32 offset, u16 *data)
 {
 	u32 status, timeout;
 
+	ATH5K_TRACE(ah->ah_sc);
 	/*
 	 * Initialize EEPROM access
 	 */
@@ -714,7 +715,7 @@ ath5k_eeprom_convert_pcal_info_5111(struct ath5k_hw *ah, int mode,
 
 		/* Only one curve for RF5111
 		 * find out which one and place
-		 * in pd_curves.
+		 * in in pd_curves.
 		 * Note: ee_x_gain is reversed here */
 		for (idx = 0; idx < AR5K_EEPROM_N_PD_CURVES; idx++) {
 

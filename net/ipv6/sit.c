@@ -249,6 +249,8 @@ failed:
 	return NULL;
 }
 
+static DEFINE_SPINLOCK(ipip6_prl_lock);
+
 #define for_each_prl_rcu(start)			\
 	for (prl = rcu_dereference(start);	\
 	     prl;				\
@@ -338,7 +340,7 @@ ipip6_tunnel_add_prl(struct ip_tunnel *t, struct ip_tunnel_prl *a, int chg)
 	if (a->addr == htonl(INADDR_ANY))
 		return -EINVAL;
 
-	ASSERT_RTNL();
+	spin_lock(&ipip6_prl_lock);
 
 	for (p = t->prl; p; p = p->next) {
 		if (p->addr == a->addr) {
@@ -368,6 +370,7 @@ ipip6_tunnel_add_prl(struct ip_tunnel *t, struct ip_tunnel_prl *a, int chg)
 	t->prl_count++;
 	rcu_assign_pointer(t->prl, p);
 out:
+	spin_unlock(&ipip6_prl_lock);
 	return err;
 }
 
@@ -394,7 +397,7 @@ ipip6_tunnel_del_prl(struct ip_tunnel *t, struct ip_tunnel_prl *a)
 	struct ip_tunnel_prl_entry *x, **p;
 	int err = 0;
 
-	ASSERT_RTNL();
+	spin_lock(&ipip6_prl_lock);
 
 	if (a && a->addr != htonl(INADDR_ANY)) {
 		for (p = &t->prl; *p; p = &(*p)->next) {
@@ -416,6 +419,7 @@ ipip6_tunnel_del_prl(struct ip_tunnel *t, struct ip_tunnel_prl *a)
 		}
 	}
 out:
+	spin_unlock(&ipip6_prl_lock);
 	return err;
 }
 
@@ -712,7 +716,7 @@ static netdev_tx_t ipip6_tunnel_xmit(struct sk_buff *skb,
 		stats->tx_carrier_errors++;
 		goto tx_error_icmp;
 	}
-	tdev = rt->dst.dev;
+	tdev = rt->u.dst.dev;
 
 	if (tdev == dev) {
 		ip_rt_put(rt);
@@ -721,7 +725,7 @@ static netdev_tx_t ipip6_tunnel_xmit(struct sk_buff *skb,
 	}
 
 	if (df) {
-		mtu = dst_mtu(&rt->dst) - sizeof(struct iphdr);
+		mtu = dst_mtu(&rt->u.dst) - sizeof(struct iphdr);
 
 		if (mtu < 68) {
 			stats->collisions++;
@@ -780,7 +784,7 @@ static netdev_tx_t ipip6_tunnel_xmit(struct sk_buff *skb,
 	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
 	IPCB(skb)->flags = 0;
 	skb_dst_drop(skb);
-	skb_dst_set(skb, &rt->dst);
+	skb_dst_set(skb, &rt->u.dst);
 
 	/*
 	 *	Push down and install the IPIP header.
@@ -829,7 +833,7 @@ static void ipip6_tunnel_bind_dev(struct net_device *dev)
 				    .proto = IPPROTO_IPV6 };
 		struct rtable *rt;
 		if (!ip_route_output_key(dev_net(dev), &rt, &fl)) {
-			tdev = rt->dst.dev;
+			tdev = rt->u.dst.dev;
 			ip_rt_put(rt);
 		}
 		dev->flags |= IFF_POINTOPOINT;

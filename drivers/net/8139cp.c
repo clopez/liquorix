@@ -322,7 +322,7 @@ struct cp_dma_stats {
 	__le32			rx_ok_mcast;
 	__le16			tx_abort;
 	__le16			tx_underrun;
-} __packed;
+} __attribute__((packed));
 
 struct cp_extra_stats {
 	unsigned long		rx_frags;

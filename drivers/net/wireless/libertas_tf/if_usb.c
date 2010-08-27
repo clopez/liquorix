@@ -538,14 +538,15 @@ static void if_usb_receive_fwload(struct urb *urb)
 		return;
 	}
 
-	syncfwheader = kmemdup(skb->data, sizeof(struct fwsyncheader),
-			       GFP_ATOMIC);
+	syncfwheader = kmalloc(sizeof(struct fwsyncheader), GFP_ATOMIC);
 	if (!syncfwheader) {
 		lbtf_deb_usbd(&cardp->udev->dev, "Failure to allocate syncfwheader\n");
 		kfree_skb(skb);
 		lbtf_deb_leave(LBTF_DEB_USB);
 		return;
 	}
+
+	memcpy(syncfwheader, skb->data, sizeof(struct fwsyncheader));
 
 	if (!syncfwheader->cmd) {
 		lbtf_deb_usb2(&cardp->udev->dev, "FW received Blk with correct CRC\n");

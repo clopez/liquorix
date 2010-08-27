@@ -330,7 +330,7 @@ struct _dlci_stat
 {
 	short dlci;
 	char  flags;
-} __packed;
+} __attribute__((packed));
 
 struct _frad_stat 
 {
@@ -1211,9 +1211,14 @@ static int sdla_xfer(struct net_device *dev, struct sdla_mem __user *info, int r
 	}
 	else
 	{
-		temp = memdup_user(mem.data, mem.len);
-		if (IS_ERR(temp))
-			return PTR_ERR(temp);
+		temp = kmalloc(mem.len, GFP_KERNEL);
+		if (!temp)
+			return(-ENOMEM);
+		if(copy_from_user(temp, mem.data, mem.len))
+		{
+			kfree(temp);
+			return -EFAULT;
+		}
 		sdla_write(dev, mem.addr, temp, mem.len);
 		kfree(temp);
 	}

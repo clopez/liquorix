@@ -20,12 +20,7 @@
 
 /*
 	Module: rt2x00dump
-	Abstract:
-		Data structures for the rt2x00debug & userspace.
-
-		The declarations in this file can be used by both rt2x00
-		and userspace and therefore should be kept together in
-		this file.
+	Abstract: Data structures for the rt2x00debug & userspace.
  */
 
 #ifndef RT2X00DUMP_H
@@ -116,7 +111,7 @@ struct rt2x00dump_hdr {
 
 	__le16 chip_rt;
 	__le16 chip_rf;
-	__le16 chip_rev;
+	__le32 chip_rev;
 
 	__le16 type;
 	__u8 queue_index;

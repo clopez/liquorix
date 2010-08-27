@@ -3,7 +3,6 @@
 #include <linux/skbuff.h>
 #include <net/ip.h>
 #include <net/ipv6.h>
-#include <net/sctp/sctp.h>
 #include <linux/sctp.h>
 
 #include <linux/netfilter/x_tables.h>
@@ -68,7 +67,7 @@ match_packet(const struct sk_buff *skb,
 			 ++i, offset, sch->type, htons(sch->length),
 			 sch->flags);
 #endif
-		offset += WORD_ROUND(ntohs(sch->length));
+		offset += (ntohs(sch->length) + 3) & ~3;
 
 		pr_debug("skb->len: %d\toffset: %d\n", skb->len, offset);
 

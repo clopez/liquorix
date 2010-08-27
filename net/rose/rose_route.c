@@ -109,9 +109,7 @@ static int __must_check rose_add_node(struct rose_route_struct *rose_route,
 		init_timer(&rose_neigh->t0timer);
 
 		if (rose_route->ndigis != 0) {
-			rose_neigh->digipeat =
-				kmalloc(sizeof(ax25_digi), GFP_ATOMIC);
-			if (rose_neigh->digipeat == NULL) {
+			if ((rose_neigh->digipeat = kmalloc(sizeof(ax25_digi), GFP_KERNEL)) == NULL) {
 				kfree(rose_neigh);
 				res = -ENOMEM;
 				goto out;
