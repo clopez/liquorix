@@ -1139,10 +1139,14 @@ struct sched_entity {
 	struct load_weight	load;		/* for load-balancing */
 	struct rb_node		run_node;
 	struct list_head	group_node;
+#ifdef CONFIG_SCHED_CFS
 	unsigned int		on_rq:1,
 				interactive:1,
 				timer:1,
 				fork_expedited:1;
+#else
+	unsigned int		on_rq;
+#endif
 
 	u64			exec_start;
 	u64			sum_exec_runtime;
@@ -1538,6 +1542,7 @@ struct task_struct {
 #endif
 };
 
+#ifdef CONFIG_SCHED_CFS
 static inline void sched_wake_interactive_enable(void)
 {
 	current->sched_wake_interactive++;
@@ -1547,6 +1552,7 @@ static inline void sched_wake_interactive_disable(void)
 {
 	current->sched_wake_interactive--;
 }
+#endif
 
 static inline void sched_wake_timer_enable(void)
 {
