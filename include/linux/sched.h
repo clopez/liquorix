@@ -1564,7 +1564,6 @@ static inline void sched_wake_interactive_disable(void)
 {
 	current->sched_wake_interactive--;
 }
-#endif
 
 static inline void sched_wake_timer_enable(void)
 {
@@ -1575,6 +1574,7 @@ static inline void sched_wake_timer_disable(void)
 {
 	current->sched_wake_timer--;
 }
+#endif
 
 #ifdef CONFIG_SCHED_BFS
 extern int grunqueue_is_locked(void);
