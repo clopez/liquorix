@@ -36,12 +36,6 @@
 #include <linux/pagevec.h>
 #include <trace/events/writeback.h>
 
-/*
- * After a CPU has dirtied this many pages, balance_dirty_pages_ratelimited
- * will look to see if it needs to force writeback or throttling.
- */
-static long ratelimit_pages = 32;
-
 /* The following parameters are exported via /proc/sys/vm */
 
 /*
@@ -458,6 +452,40 @@ unsigned long bdi_dirty_limit(struct backing_dev_info *bdi, unsigned long dirty)
 }
 
 /*
+ * After a task dirtied this many pages, balance_dirty_pages_ratelimited_nr()
+ * will look to see if it needs to start dirty throttling.
+ *
+ * If ratelimit_pages is too low then big NUMA machines will call the expensive
+ * global_page_state() too often. So scale it adaptively to the safety margin
+ * (the number of pages we may dirty without exceeding the dirty limits).
+ */
+static unsigned long ratelimit_pages(struct backing_dev_info *bdi)
+{
+	unsigned long background_thresh;
+	unsigned long dirty_thresh;
+	unsigned long dirty_pages;
+
+	global_dirty_limits(&background_thresh, &dirty_thresh);
+	dirty_pages = global_page_state(NR_FILE_DIRTY) +
+		      global_page_state(NR_WRITEBACK) +
+		      global_page_state(NR_UNSTABLE_NFS);
+
+	if (dirty_pages <= (dirty_thresh + background_thresh) / 2)
+		goto out;
+
+	dirty_thresh = bdi_dirty_limit(bdi, dirty_thresh);
+	dirty_pages  = bdi_stat(bdi, BDI_RECLAIMABLE) +
+		       bdi_stat(bdi, BDI_WRITEBACK);
+
+	if (dirty_pages < dirty_thresh)
+		goto out;
+
+	return 1;
+out:
+	return 1 + int_sqrt(dirty_thresh - dirty_pages);
+}
+
+/*
  * balance_dirty_pages() must be called by processes which are generating dirty
  * data.  It looks at the number of dirty pages in the machine and will force
  * the caller to perform writeback if the system is over `vm_dirty_ratio'.
@@ -473,7 +501,7 @@ static void balance_dirty_pages(struct address_space *mapping,
 	unsigned long dirty_thresh;
 	unsigned long bdi_thresh;
 	unsigned long bw;
-	unsigned long pause;
+	unsigned long pause = 0;
 	bool dirty_exceeded = false;
 	struct backing_dev_info *bdi = mapping->backing_dev_info;
 
@@ -555,6 +583,17 @@ pause:
 	if (!dirty_exceeded && bdi->dirty_exceeded)
 		bdi->dirty_exceeded = 0;
 
+	if (pause == 0 && nr_dirty < background_thresh)
+		current->nr_dirtied_pause = ratelimit_pages(bdi);
+	else if (pause == 1)
+		current->nr_dirtied_pause += current->nr_dirtied_pause >> 5;
+	else if (pause >= HZ/10)
+		/*
+		 * when repeated, writing 1 page per 100ms on slow devices,
+		 * i-(i+2)/4 will be able to reach 1 but never reduce to 0.
+		 */
+		current->nr_dirtied_pause -= (current->nr_dirtied_pause+2) >> 2;
+
 	if (writeback_in_progress(bdi))
 		return;
 
@@ -581,8 +620,6 @@ void set_page_dirty_balance(struct page *page, int page_mkwrite)
 	}
 }
 
-static DEFINE_PER_CPU(unsigned long, bdp_ratelimits) = 0;
-
 /**
  * balance_dirty_pages_ratelimited_nr - balance dirty memory state
  * @mapping: address_space which was dirtied
@@ -592,36 +629,30 @@ static DEFINE_PER_CPU(unsigned long, bdp_ratelimits) = 0;
  * which was newly dirtied.  The function will periodically check the system's
  * dirty state and will initiate writeback if needed.
  *
- * On really big machines, get_writeback_state is expensive, so try to avoid
+ * On really big machines, global_page_state() is expensive, so try to avoid
  * calling it too often (ratelimiting).  But once we're over the dirty memory
- * limit we decrease the ratelimiting by a lot, to prevent individual processes
- * from overshooting the limit by (ratelimit_pages) each.
+ * limit we disable the ratelimiting, to prevent individual processes from
+ * overshooting the limit by (ratelimit_pages) each.
  */
 void balance_dirty_pages_ratelimited_nr(struct address_space *mapping,
 					unsigned long nr_pages_dirtied)
 {
-	unsigned long ratelimit;
-	unsigned long *p;
+	struct backing_dev_info *bdi = mapping->backing_dev_info;
 
-	ratelimit = ratelimit_pages;
-	if (mapping->backing_dev_info->dirty_exceeded)
-		ratelimit = 8;
+	current->nr_dirtied += nr_pages_dirtied;
+
+	if (unlikely(!current->nr_dirtied_pause))
+		current->nr_dirtied_pause = ratelimit_pages(bdi);
 
 	/*
 	 * Check the rate limiting. Also, we do not want to throttle real-time
 	 * tasks in balance_dirty_pages(). Period.
 	 */
-	preempt_disable();
-	p =  &__get_cpu_var(bdp_ratelimits);
-	*p += nr_pages_dirtied;
-	if (unlikely(*p >= ratelimit)) {
-		ratelimit = *p;
-		*p = 0;
-		preempt_enable();
-		balance_dirty_pages(mapping, ratelimit);
-		return;
+	if (unlikely(current->nr_dirtied >= current->nr_dirtied_pause ||
+		     bdi->dirty_exceeded)) {
+		balance_dirty_pages(mapping, current->nr_dirtied);
+		current->nr_dirtied = 0;
 	}
-	preempt_enable();
 }
 EXPORT_SYMBOL(balance_dirty_pages_ratelimited_nr);
 
@@ -709,44 +740,6 @@ void laptop_sync_completion(void)
 #endif
 
 /*
- * If ratelimit_pages is too high then we can get into dirty-data overload
- * if a large number of processes all perform writes at the same time.
- * If it is too low then SMP machines will call the (expensive)
- * get_writeback_state too often.
- *
- * Here we set ratelimit_pages to a level which ensures that when all CPUs are
- * dirtying in parallel, we cannot go more than 3% (1/32) over the dirty memory
- * thresholds before writeback cuts in.
- *
- * But the limit should not be set too high.  Because it also controls the
- * amount of memory which the balance_dirty_pages() caller has to write back.
- * If this is too large then the caller will block on the IO queue all the
- * time.  So limit it to four megabytes - the balance_dirty_pages() caller
- * will write six megabyte chunks, max.
- */
-
-void writeback_set_ratelimit(void)
-{
-	ratelimit_pages = vm_total_pages / (num_online_cpus() * 32);
-	if (ratelimit_pages < 16)
-		ratelimit_pages = 16;
-	if (ratelimit_pages * PAGE_CACHE_SIZE > 4096 * 1024)
-		ratelimit_pages = (4096 * 1024) / PAGE_CACHE_SIZE;
-}
-
-static int __cpuinit
-ratelimit_handler(struct notifier_block *self, unsigned long u, void *v)
-{
-	writeback_set_ratelimit();
-	return NOTIFY_DONE;
-}
-
-static struct notifier_block __cpuinitdata ratelimit_nb = {
-	.notifier_call	= ratelimit_handler,
-	.next		= NULL,
-};
-
-/*
  * Called early on to tune the page writeback dirty limits.
  *
  * We used to scale dirty pages according to how total memory
@@ -767,9 +760,6 @@ static struct notifier_block __cpuinitdata ratelimit_nb = {
 void __init page_writeback_init(void)
 {
 	int shift;
-
-	writeback_set_ratelimit();
-	register_cpu_notifier(&ratelimit_nb);
 
 	shift = calc_period_shift();
 	prop_descriptor_init(&vm_completions, shift);
