@@ -14,6 +14,16 @@ extern struct list_head inode_in_use;
 extern struct list_head inode_unused;
 
 /*
+ * The 1/8 region under the bdi dirty threshold is set aside for elastic
+ * throttling. In rare cases when the threshold is exceeded, more rigid
+ * throttling will be imposed, which will inevitably stall the dirtier task
+ * for seconds (or more) at _one_ time. The rare case could be a fork bomb
+ * where every new task dirties some more pages.
+ */
+#define BDI_SOFT_DIRTY_LIMIT	8
+#define TASK_SOFT_DIRTY_LIMIT	(BDI_SOFT_DIRTY_LIMIT * 2)
+
+/*
  * fs/fs-writeback.c
  */
 enum writeback_sync_modes {
