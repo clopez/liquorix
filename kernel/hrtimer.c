@@ -1212,6 +1212,7 @@ static void __run_hrtimer(struct hrtimer *timer, ktime_t *now)
 
 	WARN_ON(!irqs_disabled());
 
+	sched_wake_timer_enable();
 	debug_deactivate(timer);
 	__remove_hrtimer(timer, base, HRTIMER_STATE_CALLBACK, 0);
 	timer_stats_account_hrtimer(timer);
@@ -1238,6 +1239,7 @@ static void __run_hrtimer(struct hrtimer *timer, ktime_t *now)
 		enqueue_hrtimer(timer, base);
 	}
 	timer->state &= ~HRTIMER_STATE_CALLBACK;
+	sched_wake_timer_disable();
 }
 
 #ifdef CONFIG_HIGH_RES_TIMERS
