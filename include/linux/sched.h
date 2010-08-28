@@ -1269,8 +1269,10 @@ struct task_struct {
 	unsigned sched_in_iowait:1;		/* Called io_schedule() */
 	unsigned sched_reset_on_fork:1;		/* Revert to default
 						 * priority/policy on fork */
+#ifdef CONFIG_SCHED_CFS
 	unsigned sched_wake_interactive:4;	/* User-driven wakeup */
 	unsigned sched_wake_timer:4;		/* Timer-driven wakeup */
+#endif
 
 	pid_t pid;
 	pid_t tgid;
