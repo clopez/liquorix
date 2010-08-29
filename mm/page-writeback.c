@@ -485,6 +485,41 @@ out:
 	return 1 + int_sqrt(dirty_thresh - dirty_pages);
 }
 
+void bdi_update_write_bandwidth(struct backing_dev_info *bdi,
+				unsigned long *bw_time,
+				s64 *bw_written)
+{
+	unsigned long written;
+	unsigned long elapsed;
+	unsigned long bw;
+	unsigned long w;
+
+	if (*bw_written == 0)
+		goto snapshot;
+
+	elapsed = jiffies - *bw_time;
+	if (elapsed < HZ/100)
+		return;
+
+	/*
+	 * When there lots of tasks throttled in balance_dirty_pages(), they
+	 * will each try to update the bandwidth for the same period, making
+	 * the bandwidth drift much faster than the desired rate (as in the
+	 * single dirtier case). So do some rate limiting.
+	 */
+	if (jiffies - bdi->write_bandwidth_update_time < elapsed)
+		goto snapshot;
+
+	written = percpu_counter_read(&bdi->bdi_stat[BDI_WRITTEN]) - *bw_written;
+	bw = (HZ * PAGE_CACHE_SIZE * written + elapsed/2) / elapsed;
+	w = min(elapsed / (HZ/100), 128UL);
+	bdi->write_bandwidth = (bdi->write_bandwidth * (1024-w) + bw * w) >> 10;
+	bdi->write_bandwidth_update_time = jiffies;
+snapshot:
+	*bw_written = percpu_counter_read(&bdi->bdi_stat[BDI_WRITTEN]);
+	*bw_time = jiffies;
+}
+
 /*
  * balance_dirty_pages() must be called by processes which are generating dirty
  * data.  It looks at the number of dirty pages in the machine and will force
@@ -504,6 +539,8 @@ static void balance_dirty_pages(struct address_space *mapping,
 	unsigned long pause = 0;
 	bool dirty_exceeded = false;
 	struct backing_dev_info *bdi = mapping->backing_dev_info;
+	unsigned long bw_time;
+	s64 bw_written = 0;
 
 	for (;;) {
 		/*
@@ -552,7 +589,7 @@ static void balance_dirty_pages(struct address_space *mapping,
 			goto pause;
 		}
 
-		bw = 100 << 20; /* use static 100MB/s for the moment */
+		bw = bdi->write_bandwidth;
 
 		bw = bw * (bdi_thresh - bdi_dirty);
 		bw = bw / (bdi_thresh / TASK_SOFT_DIRTY_LIMIT + 1);
@@ -561,8 +598,10 @@ static void balance_dirty_pages(struct address_space *mapping,
 		pause = clamp_val(pause, 1, HZ/10);
 
 pause:
+		bdi_update_write_bandwidth(bdi, &bw_time, &bw_written);
 		__set_current_state(TASK_INTERRUPTIBLE);
 		io_schedule_timeout(pause);
+		bdi_update_write_bandwidth(bdi, &bw_time, &bw_written);
 
 		/*
 		 * The bdi thresh is somehow "soft" limit derived from the

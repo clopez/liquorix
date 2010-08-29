@@ -660,6 +660,7 @@ int bdi_init(struct backing_dev_info *bdi)
 			goto err;
 	}
 
+	bdi->write_bandwidth = 100 << 20;
 	bdi->dirty_exceeded = 0;
 	err = prop_local_init_percpu(&bdi->completions);
 

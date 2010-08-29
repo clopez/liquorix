@@ -631,6 +631,8 @@ static long wb_writeback(struct bdi_writeback *wb,
 		.range_cyclic		= work->range_cyclic,
 	};
 	unsigned long oldest_jif;
+	unsigned long bw_time;
+	s64 bw_written = 0;
 	long wrote = 0;
 	long write_chunk;
 	struct inode *inode;
@@ -664,6 +666,8 @@ static long wb_writeback(struct bdi_writeback *wb,
 		write_chunk = LONG_MAX;
 
 	wbc.wb_start = jiffies; /* livelock avoidance */
+	bdi_update_write_bandwidth(wb->bdi, &bw_time, &bw_written);
+
 	for (;;) {
 		/*
 		 * Stop writeback when nr_pages has been consumed
@@ -698,6 +702,7 @@ static long wb_writeback(struct bdi_writeback *wb,
 		else
 			writeback_inodes_wb(wb, &wbc);
 		trace_wbc_writeback_written(&wbc, wb->bdi);
+		bdi_update_write_bandwidth(wb->bdi, &bw_time, &bw_written);
 
 		work->nr_pages -= write_chunk - wbc.nr_to_write;
 		wrote += write_chunk - wbc.nr_to_write;
