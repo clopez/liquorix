@@ -635,6 +635,12 @@ static void balance_dirty_pages(struct address_space *mapping,
 		pause = clamp_val(pause, 1, HZ/10);
 
 pause:
+		trace_balance_dirty_pages(bdi,
+					  bdi_dirty,
+					  bdi_thresh,
+					  task_thresh,
+					  pages_dirtied,
+					  pause);
 		bdi_update_write_bandwidth(bdi, &bw_time, &bw_written);
 		__set_current_state(TASK_INTERRUPTIBLE);
 		io_schedule_timeout(pause);
