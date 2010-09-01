@@ -1,3 +1,10 @@
+v2.6.35-zen2 "Get the fuck out"
+- 2.6.35.4
+- Added cfs low latency features
+- Replaced upstream compcache with released one (testing sake)
+- Reverted rt2x00 branch
+- Updated tuxonice, aufs, etc.
+
 v2.6.35-zen1
 - Initial release based on 2.6.35.2 release
 - 2.6.35-ck1/bfs 323 w/ zen-tune
