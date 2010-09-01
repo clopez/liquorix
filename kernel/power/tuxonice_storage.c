@@ -154,14 +154,14 @@ static void storage_manager_simulate(void)
 
 static int usm_storage_needed(void)
 {
-	return strlen(usm_helper_data.program);
+	return sizeof(int) + strlen(usm_helper_data.program) + 1;
 }
 
 static int usm_save_config_info(char *buf)
 {
 	int len = strlen(usm_helper_data.program);
-	memcpy(buf, usm_helper_data.program, len);
-	return len;
+	memcpy(buf, usm_helper_data.program, len + 1);
+	return sizeof(int) + len + 1;
 }
 
 static void usm_load_config_info(char *buf, int size)
@@ -170,7 +170,7 @@ static void usm_load_config_info(char *buf, int size)
 	if (usm_helper_data.program[0])
 		return;
 
-	memcpy(usm_helper_data.program, buf, size);
+	memcpy(usm_helper_data.program, buf + sizeof(int), *((int *) buf));
 }
 
 static int usm_memory_needed(void)

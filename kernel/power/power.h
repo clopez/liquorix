@@ -296,25 +296,32 @@ struct memory_bitmap {
 					 * bitmap objects and bitmap block
 					 * objects
 					 */
-	struct bm_position cur;		/* most recently used bit position */
-	struct bm_position iter;	/* most recently used bit position
-					 * when iterating over a bitmap.
+	struct bm_position *states;	/* most recently used bit position */
+	int num_states;			/* when iterating over a bitmap and
+					 * number of states we support.
 					 */
 };
 
 extern int memory_bm_create(struct memory_bitmap *bm, gfp_t gfp_mask,
 		int safe_needed);
+extern int memory_bm_create_index(struct memory_bitmap *bm, gfp_t gfp_mask,
+		int safe_needed, int index);
 extern void memory_bm_free(struct memory_bitmap *bm, int clear_nosave_free);
 extern void memory_bm_set_bit(struct memory_bitmap *bm, unsigned long pfn);
 extern void memory_bm_clear_bit(struct memory_bitmap *bm, unsigned long pfn);
+extern void memory_bm_clear_bit_index(struct memory_bitmap *bm, unsigned long pfn, int index);
 extern int memory_bm_test_bit(struct memory_bitmap *bm, unsigned long pfn);
+extern int memory_bm_test_bit_index(struct memory_bitmap *bm, unsigned long pfn, int index);
 extern unsigned long memory_bm_next_pfn(struct memory_bitmap *bm);
+extern unsigned long memory_bm_next_pfn_index(struct memory_bitmap *bm,
+		int index);
 extern void memory_bm_position_reset(struct memory_bitmap *bm);
 extern void memory_bm_clear(struct memory_bitmap *bm);
 extern void memory_bm_copy(struct memory_bitmap *source,
 		struct memory_bitmap *dest);
 extern void memory_bm_dup(struct memory_bitmap *source,
 		struct memory_bitmap *dest);
+extern int memory_bm_set_iterators(struct memory_bitmap *bm, int number);
 
 #ifdef CONFIG_TOI
 struct toi_module_ops;

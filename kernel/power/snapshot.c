@@ -248,15 +248,46 @@ static inline unsigned long bm_block_bits(struct bm_block *bb)
 
 /* Functions that operate on memory bitmaps */
 
+void memory_bm_position_reset_index(struct memory_bitmap *bm, int index)
+{
+	bm->states[index].block = list_entry(bm->blocks.next,
+				struct bm_block, hook);
+	bm->states[index].bit = 0;
+}
+EXPORT_SYMBOL_GPL(memory_bm_position_reset_index);
+
 void memory_bm_position_reset(struct memory_bitmap *bm)
 {
-	bm->cur.block = list_entry(bm->blocks.next, struct bm_block, hook);
-	bm->cur.bit = 0;
+	int i;
 
-	bm->iter.block = list_entry(bm->blocks.next, struct bm_block, hook);
-	bm->iter.bit = 0;
+	for (i = 0; i < bm->num_states; i++) {
+		bm->states[i].block = list_entry(bm->blocks.next,
+				struct bm_block, hook);
+		bm->states[i].bit = 0;
+	}
 }
 EXPORT_SYMBOL_GPL(memory_bm_position_reset);
+
+int memory_bm_set_iterators(struct memory_bitmap *bm, int number)
+{
+	int bytes = number * sizeof(struct bm_position);
+	struct bm_position *new_states;
+
+	if (number < bm->num_states)
+		return 0;
+
+	new_states = kmalloc(bytes, GFP_KERNEL);
+	if (!new_states)
+		return -ENOMEM;
+
+	if (bm->states)
+		kfree(bm->states);
+
+	bm->states = new_states;
+	bm->num_states = number;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(memory_bm_set_iterators);
 
 /**
  *	create_bm_block_list - create a list of block bitmap objects
@@ -364,8 +395,8 @@ static int create_mem_extents(struct list_head *list, gfp_t gfp_mask)
 /**
   *	memory_bm_create - allocate memory for a memory bitmap
   */
-int
-memory_bm_create(struct memory_bitmap *bm, gfp_t gfp_mask, int safe_needed)
+int memory_bm_create_index(struct memory_bitmap *bm, gfp_t gfp_mask,
+		int safe_needed, int states)
 {
 	struct chain_allocator ca;
 	struct list_head mem_extents;
@@ -409,6 +440,9 @@ memory_bm_create(struct memory_bitmap *bm, gfp_t gfp_mask, int safe_needed)
 		}
 	}
 
+	if (!error)
+		error = memory_bm_set_iterators(bm, states);
+
 	bm->p_list = ca.chain;
 	memory_bm_position_reset(bm);
  Exit:
@@ -419,6 +453,12 @@ memory_bm_create(struct memory_bitmap *bm, gfp_t gfp_mask, int safe_needed)
 	bm->p_list = ca.chain;
 	memory_bm_free(bm, PG_UNSAFE_CLEAR);
 	goto Exit;
+}
+EXPORT_SYMBOL_GPL(memory_bm_create_index);
+
+int memory_bm_create(struct memory_bitmap *bm, gfp_t gfp_mask, int safe_needed)
+{
+	return memory_bm_create_index(bm, gfp_mask, safe_needed, 1);
 }
 EXPORT_SYMBOL_GPL(memory_bm_create);
 
@@ -436,16 +476,22 @@ void memory_bm_free(struct memory_bitmap *bm, int clear_nosave_free)
 	free_list_of_pages(bm->p_list, clear_nosave_free);
 
 	INIT_LIST_HEAD(&bm->blocks);
+
+	if (bm->states) {
+		kfree(bm->states);
+		bm->states = NULL;
+		bm->num_states = 0;
+	}
 }
 EXPORT_SYMBOL_GPL(memory_bm_free);
 
 /**
  *	memory_bm_find_bit - find the bit in the bitmap @bm that corresponds
  *	to given pfn.  The cur_zone_bm member of @bm and the cur_block member
- *	of @bm->cur_zone_bm are updated.
+ *	of @bm->states[i]_zone_bm are updated.
  */
-static int memory_bm_find_bit(struct memory_bitmap *bm, unsigned long pfn,
-				void **addr, unsigned int *bit_nr)
+static int memory_bm_find_bit_index(struct memory_bitmap *bm, unsigned long pfn,
+				void **addr, unsigned int *bit_nr, int state)
 {
 	struct bm_block *bb;
 
@@ -453,7 +499,7 @@ static int memory_bm_find_bit(struct memory_bitmap *bm, unsigned long pfn,
 	 * Check if the pfn corresponds to the current bitmap block and find
 	 * the block where it fits if this is not the case.
 	 */
-	bb = bm->cur.block;
+	bb = bm->states[state].block;
 	if (pfn < bb->start_pfn)
 		list_for_each_entry_continue_reverse(bb, &bm->blocks, hook)
 			if (pfn >= bb->start_pfn)
@@ -468,12 +514,18 @@ static int memory_bm_find_bit(struct memory_bitmap *bm, unsigned long pfn,
 		return -EFAULT;
 
 	/* The block has been found */
-	bm->cur.block = bb;
+	bm->states[state].block = bb;
 	pfn -= bb->start_pfn;
-	bm->cur.bit = pfn + 1;
+	bm->states[state].bit = pfn + 1;
 	*bit_nr = pfn;
 	*addr = bb->data;
 	return 0;
+}
+
+static int memory_bm_find_bit(struct memory_bitmap *bm, unsigned long pfn,
+				void **addr, unsigned int *bit_nr)
+{
+	return memory_bm_find_bit_index(bm, pfn, addr, bit_nr, 0);
 }
 
 void memory_bm_set_bit(struct memory_bitmap *bm, unsigned long pfn)
@@ -500,27 +552,41 @@ static int mem_bm_set_bit_check(struct memory_bitmap *bm, unsigned long pfn)
 	return error;
 }
 
-void memory_bm_clear_bit(struct memory_bitmap *bm, unsigned long pfn)
+void memory_bm_clear_bit_index(struct memory_bitmap *bm, unsigned long pfn,
+		int index)
 {
 	void *addr;
 	unsigned int bit;
 	int error;
 
-	error = memory_bm_find_bit(bm, pfn, &addr, &bit);
+	error = memory_bm_find_bit_index(bm, pfn, &addr, &bit, index);
 	BUG_ON(error);
 	clear_bit(bit, addr);
 }
+EXPORT_SYMBOL_GPL(memory_bm_clear_bit_index);
+
+void memory_bm_clear_bit(struct memory_bitmap *bm, unsigned long pfn)
+{
+	memory_bm_clear_bit_index(bm, pfn, 0);
+}
 EXPORT_SYMBOL_GPL(memory_bm_clear_bit);
 
-int memory_bm_test_bit(struct memory_bitmap *bm, unsigned long pfn)
+int memory_bm_test_bit_index(struct memory_bitmap *bm, unsigned long pfn,
+		int index)
 {
 	void *addr;
 	unsigned int bit;
 	int error;
 
-	error = memory_bm_find_bit(bm, pfn, &addr, &bit);
+	error = memory_bm_find_bit_index(bm, pfn, &addr, &bit, index);
 	BUG_ON(error);
 	return test_bit(bit, addr);
+}
+EXPORT_SYMBOL_GPL(memory_bm_test_bit_index);
+
+int memory_bm_test_bit(struct memory_bitmap *bm, unsigned long pfn)
+{
+	return memory_bm_test_bit_index(bm, pfn, 0);
 }
 EXPORT_SYMBOL_GPL(memory_bm_test_bit);
 
@@ -541,29 +607,35 @@ static bool memory_bm_pfn_present(struct memory_bitmap *bm, unsigned long pfn)
  *	this function.
  */
 
-unsigned long memory_bm_next_pfn(struct memory_bitmap *bm)
+unsigned long memory_bm_next_pfn_index(struct memory_bitmap *bm, int index)
 {
 	struct bm_block *bb;
 	int bit;
 
-	bb = bm->iter.block;
+	bb = bm->states[index].block;
 	do {
-		bit = bm->iter.bit;
+		bit = bm->states[index].bit;
 		bit = find_next_bit(bb->data, bm_block_bits(bb), bit);
 		if (bit < bm_block_bits(bb))
 			goto Return_pfn;
 
 		bb = list_entry(bb->hook.next, struct bm_block, hook);
-		bm->iter.block = bb;
-		bm->iter.bit = 0;
+		bm->states[index].block = bb;
+		bm->states[index].bit = 0;
 	} while (&bb->hook != &bm->blocks);
 
-	memory_bm_position_reset(bm);
+	memory_bm_position_reset_index(bm, index);
 	return BM_END_OF_MAP;
 
  Return_pfn:
-	bm->iter.bit = bit + 1;
+	bm->states[index].bit = bit + 1;
 	return bb->start_pfn + bit;
+}
+EXPORT_SYMBOL_GPL(memory_bm_next_pfn_index);
+
+unsigned long memory_bm_next_pfn(struct memory_bitmap *bm)
+{
+	return memory_bm_next_pfn_index(bm, 0);
 }
 EXPORT_SYMBOL_GPL(memory_bm_next_pfn);
 

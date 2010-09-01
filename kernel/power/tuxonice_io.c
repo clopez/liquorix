@@ -76,6 +76,8 @@ int toi_max_workers;
 static char *image_version_error = "The image header version is newer than " \
 	"this kernel supports.";
 
+struct toi_module_ops *first_filter;
+
 /**
  * toi_attempt_to_parse_resume_device - determine if we can hibernate
  *
@@ -395,13 +397,12 @@ static struct page *copy_page_from_orig_page(struct page *orig_page)
  * @data_pfn: The pfn where the next data to write is located.
  * @my_io_index: The index of the page in the pageset.
  * @write_pfn: The pfn number to write in the image (where the data belongs).
- * @first_filter: Where to send the page (optimisation).
  *
  * Get the pfn of the next page to write, map the page if necessary and do the
  * write.
  **/
 static int write_next_page(unsigned long *data_pfn, int *my_io_index,
-		unsigned long *write_pfn, struct toi_module_ops *first_filter)
+		unsigned long *write_pfn)
 {
 	struct page *page;
 	char **my_checksum_locn = &__get_cpu_var(checksum_locn);
@@ -441,7 +442,8 @@ static int write_next_page(unsigned long *data_pfn, int *my_io_index,
 	if (io_pageset == 2 && tuxonice_calc_checksum(page, *my_checksum_locn))
 		return 1;
 
-	result = first_filter->write_page(*write_pfn, page, PAGE_SIZE);
+	result = first_filter->write_page(*write_pfn, TOI_PAGE, page,
+			PAGE_SIZE);
 
 	if (!was_present)
 		kernel_map_pages(page, 1, 0);
@@ -463,13 +465,13 @@ static int write_next_page(unsigned long *data_pfn, int *my_io_index,
  **/
 
 static int read_next_page(int *my_io_index, unsigned long *write_pfn,
-		struct page *buffer, struct toi_module_ops *first_filter)
+		struct page *buffer)
 {
 	unsigned int buf_size = PAGE_SIZE;
 	unsigned long left = atomic_read(&io_count);
 
 	if (left)
-		*my_io_index = io_finish_at - atomic_sub_return(1, &io_count);
+		*my_io_index = io_finish_at - atomic_read(&io_count);
 
 	mutex_unlock(&io_mutex);
 
@@ -499,7 +501,7 @@ static int read_next_page(int *my_io_index, unsigned long *write_pfn,
 	 * See toi_bio_read_page in tuxonice_bio.c:
 	 * read the next page in the image.
 	 */
-	return first_filter->read_page(write_pfn, buffer, &buf_size);
+	return first_filter->read_page(write_pfn, TOI_PAGE, buffer, &buf_size);
 }
 
 static void use_read_page(unsigned long write_pfn, struct page *buffer)
@@ -507,31 +509,32 @@ static void use_read_page(unsigned long write_pfn, struct page *buffer)
 	struct page *final_page = pfn_to_page(write_pfn),
 		    *copy_page = final_page;
 	char *virt, *buffer_virt;
+	int was_present, cpu = smp_processor_id();
 
-	if (io_pageset == 1 && !PagePageset1Copy(final_page)) {
+	toi_message(TOI_IO, TOI_VERBOSE, 0, "Seeking to use pfn %ld.", write_pfn);
+	if (io_pageset == 1 && (!pageset1_copy_map ||
+			!memory_bm_test_bit_index(pageset1_copy_map, write_pfn, cpu))) {
 		copy_page = copy_page_from_orig_page(final_page);
 		BUG_ON(!copy_page);
 	}
 
-	if (memory_bm_test_bit(io_map, write_pfn)) {
-		int was_present;
-
-		virt = kmap(copy_page);
-		buffer_virt = kmap(buffer);
-		was_present = kernel_page_present(copy_page);
-		if (!was_present)
-			kernel_map_pages(copy_page, 1, 1);
-		memcpy(virt, buffer_virt, PAGE_SIZE);
-		if (!was_present)
-			kernel_map_pages(copy_page, 1, 0);
-		kunmap(copy_page);
-		kunmap(buffer);
-		memory_bm_clear_bit(io_map, write_pfn);
-	} else {
-		mutex_lock(&io_mutex);
-		atomic_inc(&io_count);
-		mutex_unlock(&io_mutex);
+	if (!memory_bm_test_bit_index(io_map, write_pfn, cpu)) {
+		toi_message(TOI_IO, TOI_VERBOSE, 0, "Ignoring read of pfn %ld.", write_pfn);
+		return;
 	}
+
+	virt = kmap(copy_page);
+	buffer_virt = kmap(buffer);
+	was_present = kernel_page_present(copy_page);
+	if (!was_present)
+		kernel_map_pages(copy_page, 1, 1);
+	memcpy(virt, buffer_virt, PAGE_SIZE);
+	if (!was_present)
+		kernel_map_pages(copy_page, 1, 0);
+	kunmap(copy_page);
+	kunmap(buffer);
+	memory_bm_clear_bit_index(io_map, write_pfn, cpu);
+	atomic_dec(&io_count);
 }
 
 static unsigned long status_update(int writing, unsigned long done,
@@ -570,7 +573,6 @@ static int worker_rw_loop(void *data)
 	unsigned long data_pfn, write_pfn, next_jiffies = jiffies + HZ / 4,
 		      jif_index = 1, start_time = jiffies;
 	int result = 0, my_io_index = 0, last_worker;
-	struct toi_module_ops *first_filter = toi_get_next_filter(NULL);
 	struct page *buffer = toi_alloc_page(28, TOI_ATOMIC_GFP);
 
 	current->flags |= PF_NOFREEZE;
@@ -594,16 +596,20 @@ static int worker_rw_loop(void *data)
 		 */
 		if (io_write)
 			result = write_next_page(&data_pfn, &my_io_index,
-					&write_pfn, first_filter);
+					&write_pfn);
 		else /* Reading */
 			result = read_next_page(&my_io_index, &write_pfn,
-					buffer, first_filter);
+					buffer);
 
 		if (result) {
 			mutex_lock(&io_mutex);
 			/* Nothing to do? */
-			if (result == -ENODATA)
+			if (result == -ENODATA) {
+				toi_message(TOI_IO, TOI_VERBOSE, 0,
+					"Thread %d has no more work.",
+					(int) data);
 				break;
+			}
 
 			io_result = result;
 
@@ -654,19 +660,15 @@ static int worker_rw_loop(void *data)
 		 */
 
 		mutex_lock(&io_mutex);
+		toi_message(TOI_IO, TOI_VERBOSE, 0, "%d pages still to do, %d workers running.",
+				atomic_read(&io_count), atomic_read(&toi_io_workers));
 
 	} while (atomic_read(&io_count) >= atomic_read(&toi_io_workers) &&
 		!(io_write && test_result_state(TOI_ABORTED)));
 
 	last_worker = atomic_dec_and_test(&toi_io_workers);
+	toi_message(TOI_IO, TOI_VERBOSE, 0, "%d workers left.", atomic_read(&toi_io_workers));
 	mutex_unlock(&io_mutex);
-
-	if (last_worker) {
-		toi_bio_queue_flusher_should_finish = 1;
-		wake_up(&toi_io_queue_flusher);
-		result = toiActiveAllocator->finish_all_io();
-		printk(KERN_CONT "\n");
-	}
 
 	toi__free_page(28, buffer);
 
@@ -712,8 +714,11 @@ static int start_other_threads(void)
 static int do_rw_loop(int write, int finish_at, struct memory_bitmap *pageflags,
 		int base, int barmax, int pageset)
 {
-	int index = 0, cpu, num_other_threads = 0, result = 0;
+	int index = 0, cpu, num_other_threads = 0, result = 0, flusher = 0;
+	int workers_started = 0;
 	unsigned long pfn;
+
+	first_filter = toi_get_next_filter(NULL);
 
 	if (!finish_at)
 		return 0;
@@ -757,7 +762,6 @@ static int do_rw_loop(int write, int finish_at, struct memory_bitmap *pageflags,
 	memory_bm_position_reset(pageset1_map);
 
 	clear_toi_state(TOI_IO_STOPPED);
-	memory_bm_position_reset(io_map);
 
 	if (!test_action_state(TOI_NO_MULTITHREADED_IO) &&
 		(write || !toi_force_no_multithreaded))
@@ -766,12 +770,26 @@ static int do_rw_loop(int write, int finish_at, struct memory_bitmap *pageflags,
 	if (!num_other_threads || !toiActiveAllocator->io_flusher ||
 		test_action_state(TOI_NO_FLUSHER_THREAD)) {
 		atomic_inc(&toi_io_workers);
-		worker_rw_loop(num_other_threads ? NULL : MONITOR);
 	} else
+		flusher = 1;
+
+	workers_started = atomic_read(&toi_io_workers);
+
+	memory_bm_set_iterators(io_map, workers_started);
+	memory_bm_position_reset(io_map);
+
+	memory_bm_set_iterators(pageset1_copy_map, workers_started);
+	memory_bm_position_reset(pageset1_copy_map);
+
+	if (flusher)
 		result = toiActiveAllocator->io_flusher(write);
+	else
+		worker_rw_loop(num_other_threads ? NULL : MONITOR);
 
 	while (atomic_read(&toi_io_workers))
 		schedule();
+
+	printk(KERN_CONT "\n");
 
 	if (unlikely(test_toi_state(TOI_STOP_RESUME))) {
 		if (!atomic_read(&toi_io_workers)) {
@@ -798,6 +816,7 @@ static int do_rw_loop(int write, int finish_at, struct memory_bitmap *pageflags,
 					finish_at, atomic_read(&io_count));
 			printk(KERN_INFO "I/O bitmap still records work to do."
 					"%ld.\n", next);
+			BUG();
 			do {
 				cpu_relax();
 			} while (0);

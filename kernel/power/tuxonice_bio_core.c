@@ -292,6 +292,8 @@ static void update_throughput_throttle(int jif_index)
 static int toi_finish_all_io(void)
 {
 	int result = toi_bio_queue_flush_pages(0);
+	toi_bio_queue_flusher_should_finish = 1;
+	wake_up(&toi_io_queue_flusher);
 	wait_event(num_in_progress_wait, !TOTAL_OUTSTANDING_IO);
 	return result;
 }
@@ -399,14 +401,17 @@ static int submit(int writing, struct block_device *dev, sector_t first_block,
 	}
 
 
-	if (unlikely(test_action_state(TOI_TEST_BIO))) {
+	/* Still read the header! */
+	if (unlikely(test_action_state(TOI_TEST_BIO) && writing)) {
 		/* Fake having done the hard work */
 		set_bit(BIO_UPTODATE, &bio->bi_flags);
 		toi_end_bio(bio, 0);
 	} else
-		submit_bio(writing | (1 << BIO_RW_SYNCIO) |
-				(1 << BIO_RW_TUXONICE) |
-				(1 << BIO_RW_UNPLUG), bio);
+		submit_bio(writing
+				| (1 << BIO_RW_SYNCIO)
+				| (1 << BIO_RW_TUXONICE)
+				| (1 << BIO_RW_UNPLUG)
+				/* | (1 << BIO_RW_NOIDLE) */, bio);
 
 	return 0;
 }
@@ -801,8 +806,8 @@ static int bio_io_flusher(int writing)
  **/
 static int toi_bio_get_next_page_read(int no_readahead)
 {
-	unsigned long *virt;
-	struct page *next;
+	char *virt;
+	struct page *old_readahead_list_head;
 
 	/*
 	 * When reading the second page of the header, we have to
@@ -840,10 +845,12 @@ static int toi_bio_get_next_page_read(int no_readahead)
 
 	virt = page_address(readahead_list_head);
 	memcpy(toi_writer_buffer, virt, PAGE_SIZE);
-
-	next = (struct page *) readahead_list_head->private;
-	toi__free_page(12, readahead_list_head);
-	readahead_list_head = next;
+	
+	mutex_lock(&toi_bio_readahead_mutex);
+	old_readahead_list_head = readahead_list_head;
+	readahead_list_head = (struct page *) readahead_list_head->private;
+	mutex_unlock(&toi_bio_readahead_mutex);
+	toi__free_page(12, old_readahead_list_head);
 	return 0;
 }
 
@@ -997,12 +1004,12 @@ static int toi_rw_buffer(int writing, char *buffer, int buffer_size,
  * Read a (possibly compressed) page from the image, into buffer_page,
  * returning its pfn and the buffer size.
  **/
-static int toi_bio_read_page(unsigned long *pfn, struct page *buffer_page,
-		unsigned int *buf_size)
+static int toi_bio_read_page(unsigned long *pfn, int buf_type,
+		void *buffer_page, unsigned int *buf_size)
 {
 	int result = 0;
 	int this_idx;
-	char *buffer_virt = kmap(buffer_page);
+	char *buffer_virt = TOI_MAP(buf_type, buffer_page);
 
 	/*
 	 * Only call start_new_readahead if we don't have a dedicated thread
@@ -1024,13 +1031,15 @@ static int toi_bio_read_page(unsigned long *pfn, struct page *buffer_page,
 	 * Structure in the image:
 	 *	[destination pfn|page size|page data]
 	 * buf_size is PAGE_SIZE
+	 * We can validly find there's nothing to read in a multithreaded
+	 * situation.
 	 */
 	if (toi_rw_buffer(READ, (char *) &this_idx, sizeof(int), 0) ||
 	    toi_rw_buffer(READ, (char *) pfn, sizeof(unsigned long), 0) ||
 	    toi_rw_buffer(READ, (char *) buf_size, sizeof(int), 0) ||
 	    toi_rw_buffer(READ, buffer_virt, *buf_size, 0)) {
-		abort_hibernate(TOI_FAILED_IO, "Read of data failed.");
-		result = 1;
+		result = -ENODATA;
+		goto out_unlock;
 	}
 
 	if (reset_idx) {
@@ -1038,14 +1047,17 @@ static int toi_bio_read_page(unsigned long *pfn, struct page *buffer_page,
 		reset_idx = 0;
 	} else {
 		page_idx++;
-		if (page_idx != this_idx)
+		if (!this_idx)
+			result = -ENODATA;
+		else if (page_idx != this_idx)
 			printk(KERN_ERR "Got page index %d, expected %d.\n",
 					this_idx, page_idx);
 	}
 
+out_unlock:
 	my_mutex_unlock(0, &toi_bio_mutex);
 out:
-	kunmap(buffer_page);
+	TOI_UNMAP(buf_type, buffer_page);
 	return result;
 }
 
@@ -1058,8 +1070,8 @@ out:
  * Write a (possibly compressed) page to the image from the buffer, together
  * with it's index and buffer size.
  **/
-static int toi_bio_write_page(unsigned long pfn, struct page *buffer_page,
-		unsigned int buf_size)
+static int toi_bio_write_page(unsigned long pfn, int buf_type,
+		void *buffer_page, unsigned int buf_size)
 {
 	char *buffer_virt;
 	int result = 0, result2 = 0;
@@ -1071,10 +1083,10 @@ static int toi_bio_write_page(unsigned long pfn, struct page *buffer_page,
 
 	if (test_result_state(TOI_ABORTED)) {
 		my_mutex_unlock(1, &toi_bio_mutex);
-		return -EIO;
+		return 0;
 	}
 
-	buffer_virt = kmap(buffer_page);
+	buffer_virt = TOI_MAP(buf_type, buffer_page);
 	page_idx++;
 
 	/*
@@ -1091,7 +1103,7 @@ static int toi_bio_write_page(unsigned long pfn, struct page *buffer_page,
 		result = -EIO;
 	}
 
-	kunmap(buffer_page);
+	TOI_UNMAP(buf_type, buffer_page);
 	my_mutex_unlock(1, &toi_bio_mutex);
 
 	if (current == toi_queue_flusher)
@@ -1280,13 +1292,13 @@ static int toi_bio_initialise(int starting_cycle)
 
 static unsigned long raw_to_real(unsigned long raw)
 {
-	unsigned long result;
+	unsigned long extra;
 
-	result = raw - (raw * (sizeof(unsigned long) + sizeof(int)) +
+	extra = (raw * (sizeof(unsigned long) + sizeof(int)) +
 		(PAGE_SIZE + sizeof(unsigned long) + sizeof(int) + 1)) /
 		(PAGE_SIZE + sizeof(unsigned long) + sizeof(int));
 
-	return result < 0 ? 0 : result;
+	return raw > extra ? raw - extra : 0;
 }
 
 static unsigned long toi_bio_storage_available(void)
@@ -1304,8 +1316,10 @@ static unsigned long toi_bio_storage_available(void)
 	}
 
 	toi_message(TOI_IO, TOI_VERBOSE, 0, "Total storage available is %lu "
-			"pages.", sum);
-	return raw_to_real(sum - header_pages_reserved);
+			"pages (%d header pages).", sum, header_pages_reserved);
+
+	return sum > header_pages_reserved ?
+		raw_to_real(sum - header_pages_reserved) : 0;
 
 }
 

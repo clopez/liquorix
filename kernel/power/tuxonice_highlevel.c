@@ -253,7 +253,7 @@ static void mark_nosave_pages(void)
 	}
 }
 
-static int alloc_a_bitmap(struct memory_bitmap **bm)
+static int toi_alloc_bitmap(struct memory_bitmap **bm)
 {
 	int result = 0;
 
@@ -281,19 +281,19 @@ static int alloc_a_bitmap(struct memory_bitmap **bm)
  **/
 static int allocate_bitmaps(void)
 {
-	if (alloc_a_bitmap(&pageset1_map) ||
-	    alloc_a_bitmap(&pageset1_copy_map) ||
-	    alloc_a_bitmap(&pageset2_map) ||
-	    alloc_a_bitmap(&io_map) ||
-	    alloc_a_bitmap(&nosave_map) ||
-	    alloc_a_bitmap(&free_map) ||
-	    alloc_a_bitmap(&page_resave_map))
+	if (toi_alloc_bitmap(&pageset1_map) ||
+	    toi_alloc_bitmap(&pageset1_copy_map) ||
+	    toi_alloc_bitmap(&pageset2_map) ||
+	    toi_alloc_bitmap(&io_map) ||
+	    toi_alloc_bitmap(&nosave_map) ||
+	    toi_alloc_bitmap(&free_map) ||
+	    toi_alloc_bitmap(&page_resave_map))
 		return 1;
 
 	return 0;
 }
 
-static void free_a_bitmap(struct memory_bitmap **bm)
+static void toi_free_bitmap(struct memory_bitmap **bm)
 {
 	if (!*bm)
 		return;
@@ -311,13 +311,13 @@ static void free_a_bitmap(struct memory_bitmap **bm)
  **/
 static void free_bitmaps(void)
 {
-	free_a_bitmap(&pageset1_map);
-	free_a_bitmap(&pageset1_copy_map);
-	free_a_bitmap(&pageset2_map);
-	free_a_bitmap(&io_map);
-	free_a_bitmap(&nosave_map);
-	free_a_bitmap(&free_map);
-	free_a_bitmap(&page_resave_map);
+	toi_free_bitmap(&pageset1_map);
+	toi_free_bitmap(&pageset1_copy_map);
+	toi_free_bitmap(&pageset2_map);
+	toi_free_bitmap(&io_map);
+	toi_free_bitmap(&nosave_map);
+	toi_free_bitmap(&free_map);
+	toi_free_bitmap(&page_resave_map);
 }
 
 /**
@@ -711,7 +711,8 @@ Failed:
 	temp_result = write_pageset(&pagedir1);
 
 	/* We didn't overwrite any memory, so no reread needs to be done. */
-	if (test_action_state(TOI_TEST_FILTER_SPEED))
+	if (test_action_state(TOI_TEST_FILTER_SPEED) ||
+	    test_action_state(TOI_TEST_BIO))
 		return 1;
 
 	if (temp_result == 1 || test_result_state(TOI_ABORTED))
@@ -723,9 +724,6 @@ Failed:
 		goto abort_reloading_pagedir_two;
 
 	temp_result = write_image_header();
-
-	if (test_action_state(TOI_TEST_BIO))
-		return 1;
 
 	if (!temp_result && !test_result_state(TOI_ABORTED))
 		return 0;

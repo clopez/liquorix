@@ -7009,6 +7009,8 @@ void md_check_recovery(mddev_t *mddev)
 {
 	mdk_rdev_t *rdev;
 
+	if (unlikely(freezer_is_on()))
+		return;
 
 	if (mddev->bitmap)
 		bitmap_daemon_work(mddev);

@@ -336,13 +336,21 @@ __setup("toi_translate_retry", toi_translate_retry_setup);
 
 static int __init toi_debug_setup(char *str)
 {
-	toi_bkd.toi_action |= (1 << TOI_LOGALL) | (1 << TOI_PAUSE);
+	toi_bkd.toi_action |= (1 << TOI_LOGALL);
 	toi_bkd.toi_debug_state = 255;
 	toi_bkd.toi_default_console_level = 7;
 	return 1;
 }
 
 __setup("toi_debug_setup", toi_debug_setup);
+
+static int __init toi_pause_setup(char *str)
+{
+	toi_bkd.toi_action |= (1 << TOI_PAUSE);
+	return 1;
+}
+
+__setup("toi_pause", toi_pause_setup);
 
 static int __init toi_ignore_late_initcall_setup(char *str)
 {

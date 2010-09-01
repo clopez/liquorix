@@ -35,13 +35,11 @@ struct cpu_context {
 	u8 *page_buffer;
 	struct crypto_comp *transform;
 	unsigned int len;
-	char *buffer_start;
-	char *output_buffer;
-	char *check_buffer;
+	u8 *buffer_start;
+	u8 *output_buffer;
 };
 
 static DEFINE_PER_CPU(struct cpu_context, contexts);
-static int toi_check_compression;
 
 /*
  * toi_crypto_prepare
@@ -88,17 +86,6 @@ static int toi_compress_crypto_prepare(void)
 			  "compression driver.\n");
 			return -ENOMEM;
 		}
-
-		this->check_buffer =
-			(char *) toi_get_zeroed_page(16, TOI_ATOMIC_GFP);
-
-		if (!this->check_buffer) {
-			printk(KERN_ERR
-			  "Failed to allocate a check buffer for TuxOnIce "
-			  "compression driver.\n");
-			return -ENOMEM;
-		}
-
 	}
 
 	return 0;
@@ -124,11 +111,6 @@ static int toi_compress_rw_cleanup(int writing)
 			vfree(this->output_buffer);
 
 		this->output_buffer = NULL;
-
-		if (this->check_buffer)
-			toi_free_page(16, (unsigned long) this->check_buffer);
-
-		this->check_buffer = NULL;
 	}
 
 	return 0;
@@ -173,33 +155,6 @@ static int toi_compress_rw_init(int rw, int stream_number)
 	return 0;
 }
 
-static int check_compression(struct cpu_context *ctx, struct page *buffer_page,
-		int buf_size)
-{
-	char *original = kmap(buffer_page);
-	int output_size = PAGE_SIZE, okay, ret;
-
-	ret = crypto_comp_decompress(ctx->transform, ctx->output_buffer,
-			ctx->len, ctx->check_buffer, &output_size);
-	okay = (!ret && output_size == PAGE_SIZE &&
-			!memcmp(ctx->check_buffer, original, PAGE_SIZE));
-
-	if (!okay) {
-		printk("Compression test failed.\n");
-		print_hex_dump(KERN_ERR, "Original page: ", DUMP_PREFIX_NONE,
-				16, 1, original, PAGE_SIZE, 0);
-		printk(KERN_ERR "\nOutput %d bytes. Result %d.", ctx->len, ret);
-		print_hex_dump(KERN_ERR, "Compressed to: ", DUMP_PREFIX_NONE,
-				16, 1, ctx->output_buffer, ctx->len, 0);
-		printk(KERN_ERR "\nRestored to %d bytes.\n", output_size);
-		print_hex_dump(KERN_ERR, "Decompressed : ", DUMP_PREFIX_NONE,
-				16, 1, ctx->check_buffer, output_size, 0);
-	}
-	kunmap(buffer_page);
-
-	return okay;
-}
-
 /*
  * toi_compress_write_page()
  *
@@ -213,16 +168,17 @@ static int check_compression(struct cpu_context *ctx, struct page *buffer_page,
  * 		modules, -ECHILD if we have a broken pipeline or -EIO if
  * 		zlib errs.
  */
-static int toi_compress_write_page(unsigned long index,
-		struct page *buffer_page, unsigned int buf_size)
+static int toi_compress_write_page(unsigned long index, int buf_type,
+		void *buffer_page, unsigned int buf_size)
 {
 	int ret, cpu = smp_processor_id();
 	struct cpu_context *ctx = &per_cpu(contexts, cpu);
 
 	if (!ctx->transform)
-		return next_driver->write_page(index, buffer_page, buf_size);
+		return next_driver->write_page(index, TOI_PAGE, buffer_page,
+				buf_size);
 
-	ctx->buffer_start = kmap(buffer_page);
+	ctx->buffer_start = TOI_MAP(buf_type, buffer_page);
 
 	ctx->len = PAGE_SIZE;
 
@@ -230,27 +186,23 @@ static int toi_compress_write_page(unsigned long index,
 			ctx->buffer_start, buf_size,
 			ctx->output_buffer, &ctx->len);
 
-	kunmap(buffer_page);
+	TOI_UNMAP(buf_type, buffer_page);
 
 	mutex_lock(&stats_lock);
 	toi_compress_bytes_in += buf_size;
 	toi_compress_bytes_out += ctx->len;
 	mutex_unlock(&stats_lock);
 
-	if (!ret && ctx->len < buf_size) { /* some compression */
-		if (unlikely(toi_check_compression)) {
-			ret = check_compression(ctx, buffer_page, buf_size);
-			if (!ret)
-				return next_driver->write_page(index,
-						buffer_page, buf_size);
-		}
+	toi_message(TOI_COMPRESS, TOI_VERBOSE, 0,
+			"CPU %d, index %lu: compressed %d bytes into %d.",
+			cpu, index, buf_size, ctx->len);
 
-		memcpy(ctx->page_buffer, ctx->output_buffer, ctx->len);
-		return next_driver->write_page(index,
-				virt_to_page(ctx->page_buffer),
-				ctx->len);
-	} else
-		return next_driver->write_page(index, buffer_page, buf_size);
+	if (!ret && ctx->len < buf_size) /* some compression */
+		return next_driver->write_page(index, TOI_VIRT,
+				ctx->output_buffer, ctx->len);
+	else
+		return next_driver->write_page(index, TOI_PAGE, buffer_page,
+				buf_size);
 }
 
 /*
@@ -261,8 +213,8 @@ static int toi_compress_write_page(unsigned long index,
  * is filled.
  * Zero if successful. Error condition from me or from downstream on failure.
  */
-static int toi_compress_read_page(unsigned long *index,
-		struct page *buffer_page, unsigned int *buf_size)
+static int toi_compress_read_page(unsigned long *index, int buf_type,
+		void *buffer_page, unsigned int *buf_size)
 {
 	int ret, cpu = smp_processor_id();
 	unsigned int len;
@@ -271,25 +223,33 @@ static int toi_compress_read_page(unsigned long *index,
 	struct cpu_context *ctx = &per_cpu(contexts, cpu);
 
 	if (!ctx->transform)
-		return next_driver->read_page(index, buffer_page, buf_size);
+		return next_driver->read_page(index, TOI_PAGE, buffer_page,
+				buf_size);
 
 	/*
 	 * All our reads must be synchronous - we can't decompress
 	 * data that hasn't been read yet.
 	 */
 
-	ret = next_driver->read_page(index, buffer_page, &len);
-
-	/* Error or uncompressed data */
-	if (ret || len == PAGE_SIZE)
-		return ret;
+	ret = next_driver->read_page(index, TOI_VIRT, ctx->page_buffer, &len);
 
 	buffer_start = kmap(buffer_page);
-	memcpy(ctx->page_buffer, buffer_start, len);
+
+	/* Error or uncompressed data */
+	if (ret || len == PAGE_SIZE) {
+		memcpy(buffer_start, ctx->page_buffer, len);
+		goto out;
+	}
+
 	ret = crypto_comp_decompress(
 			ctx->transform,
 			ctx->page_buffer,
 			len, buffer_start, &outlen);
+
+	toi_message(TOI_COMPRESS, TOI_VERBOSE, 0,
+			"CPU %d, index %lu: decompressed %d bytes into %d (result %d).",
+			cpu, *index, len, outlen, ret);
+
 	if (ret)
 		abort_hibernate(TOI_FAILED_IO,
 			"Compress_read returned %d.\n", ret);
@@ -302,7 +262,8 @@ static int toi_compress_read_page(unsigned long *index,
 		ret = -EIO;
 		*buf_size = outlen;
 	}
-	kunmap(buffer_page);
+out:
+	TOI_UNMAP(buf_type, buffer_page);
 	return ret;
 }
 
@@ -351,7 +312,8 @@ static int toi_compress_memory_needed(void)
 
 static int toi_compress_storage_needed(void)
 {
-	return 4 * sizeof(unsigned long) + strlen(toi_compressor_name) + 1;
+	return 2 * sizeof(unsigned long) + 2 * sizeof(int) +
+		strlen(toi_compressor_name) + 1;
 }
 
 /*
@@ -363,19 +325,18 @@ static int toi_compress_storage_needed(void)
  */
 static int toi_compress_save_config_info(char *buffer)
 {
-	int namelen = strlen(toi_compressor_name) + 1;
-	int total_len;
+	int len = strlen(toi_compressor_name) + 1, offset = 0;
 
 	*((unsigned long *) buffer) = toi_compress_bytes_in;
-	*((unsigned long *) (buffer + 1 * sizeof(unsigned long))) =
-		toi_compress_bytes_out;
-	*((unsigned long *) (buffer + 2 * sizeof(unsigned long))) =
-		toi_expected_compression;
-	*((unsigned long *) (buffer + 3 * sizeof(unsigned long))) = namelen;
-	strncpy(buffer + 4 * sizeof(unsigned long), toi_compressor_name,
-								namelen);
-	total_len = 4 * sizeof(unsigned long) + namelen;
-	return total_len;
+	offset += sizeof(unsigned long);
+	*((unsigned long *) (buffer + offset)) = toi_compress_bytes_out;
+	offset += sizeof(unsigned long);
+	*((int *) (buffer + offset)) = toi_expected_compression;
+	offset += sizeof(int);
+	*((int *) (buffer + offset)) = len;
+	offset += sizeof(int);
+	strncpy(buffer + offset, toi_compressor_name, len);
+	return offset + len;
 }
 
 /* toi_compress_load_config_info
@@ -387,19 +348,17 @@ static int toi_compress_save_config_info(char *buffer)
  */
 static void toi_compress_load_config_info(char *buffer, int size)
 {
-	int namelen;
+	int len, offset = 0;
 
 	toi_compress_bytes_in = *((unsigned long *) buffer);
-	toi_compress_bytes_out = *((unsigned long *) (buffer + 1 *
-				sizeof(unsigned long)));
-	toi_expected_compression = *((unsigned long *) (buffer + 2 *
-				sizeof(unsigned long)));
-	namelen = *((unsigned long *) (buffer + 3 * sizeof(unsigned long)));
-	if (strncmp(toi_compressor_name, buffer + 4 * sizeof(unsigned long),
-				namelen))
-		strncpy(toi_compressor_name, buffer + 4 * sizeof(unsigned long),
-			namelen);
-	return;
+	offset += sizeof(unsigned long);
+	toi_compress_bytes_out = *((unsigned long *) (buffer + offset));
+	offset += sizeof(unsigned long);
+	toi_expected_compression = *((int *) (buffer + offset));
+	offset += sizeof(int);
+	len = *((int *) (buffer + offset));
+	offset += sizeof(int);
+	strncpy(toi_compressor_name, buffer + offset, len);
 }
 
 static void toi_compress_pre_atomic_restore(struct toi_boot_kernel_data *bkd)
@@ -438,8 +397,6 @@ static struct toi_sysfs_data sysfs_params[] = {
 	SYSFS_INT("expected_compression", SYSFS_RW, &toi_expected_compression,
 			0, 99, 0, NULL),
 	SYSFS_INT("enabled", SYSFS_RW, &toi_compression_ops.enabled, 0, 1, 0,
-			NULL),
-	SYSFS_INT("check", SYSFS_RW, &toi_check_compression, 0, 1, 0,
 			NULL),
 	SYSFS_STRING("algorithm", SYSFS_RW, toi_compressor_name, 31, 0, NULL),
 };

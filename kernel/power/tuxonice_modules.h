@@ -42,6 +42,20 @@ enum {
 	TOI_SYNC
 };
 
+enum {
+	TOI_VIRT,
+	TOI_PAGE,
+};
+
+#define TOI_MAP(type, addr) \
+ (type == TOI_PAGE ? kmap(addr) : addr)
+
+#define TOI_UNMAP(type, addr) \
+ do { \
+   if (type == TOI_PAGE) \
+     kunmap(addr); \
+ } while(0)
+
 struct toi_module_ops {
 	/* Functions common to all modules */
 	int type;
@@ -105,9 +119,9 @@ struct toi_module_ops {
 	 */
 	int (*rw_init) (int rw, int stream_number);
 	int (*rw_cleanup) (int rw);
-	int (*write_page) (unsigned long index, struct page *buffer_page,
+	int (*write_page) (unsigned long index, int buf_type, void *buf,
 			unsigned int buf_size);
-	int (*read_page) (unsigned long *index, struct page *buffer_page,
+	int (*read_page) (unsigned long *index, int buf_type, void *buf,
 			unsigned int *buf_size);
 	int (*io_flusher) (int rw);
 
