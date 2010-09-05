@@ -159,8 +159,8 @@ res="${res}${CONFIG_LOCALVERSION}${LOCALVERSION}"
 if test "$CONFIG_LOCALVERSION_AUTO" = "y"; then
 	# full scm version string
 	res="$res$(scm_version)"
-else
-	# apped a plus sign if the repository is not in a clean tagged
+elif test "$CONFIG_LOCALVERSION_AUTO_PLUS" = "y"; then
+    # apped a plus sign if the repository is not in a clean tagged
 	# state and  LOCALVERSION= is not specified
 	if test "${LOCALVERSION+set}" != "set"; then
 		scm=$(scm_version --short)
