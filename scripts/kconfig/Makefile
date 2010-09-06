@@ -235,6 +235,7 @@ $(obj)/.tmp_qtcheck:
 	@set -e; echo "  CHECK   qt"; dir=""; pkg=""; \
 	pkg-config --exists qt 2> /dev/null && pkg=qt; \
 	pkg-config --exists qt-mt 2> /dev/null && pkg=qt-mt; \
+	pkg-config --exists Qt3Support 2> /dev/null && pkg=Qt3Support; \
 	if [ -n "$$pkg" ]; then \
 	  cflags="\$$(shell pkg-config $$pkg --cflags)"; \
 	  libs="\$$(shell pkg-config $$pkg --libs)"; \
