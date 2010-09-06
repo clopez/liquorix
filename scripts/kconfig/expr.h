@@ -170,6 +170,8 @@ struct menu {
 	void *data;
 };
 
+typedef struct menu KCMenu; /* HACK: to avoid qt4 moc getting confused by structs - JS */
+
 #define MENU_CHANGED		0x0001
 #define MENU_ROOT		0x0002
 
