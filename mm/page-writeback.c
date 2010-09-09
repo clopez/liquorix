@@ -532,6 +532,7 @@ static void balance_dirty_pages(struct address_space *mapping,
 {
 	long nr_reclaimable;
 	long nr_dirty, bdi_dirty;  /* = file_dirty + writeback + unstable_nfs */
+	long bdi_prev_dirty = 0;
 	unsigned long background_thresh;
 	unsigned long dirty_thresh;
 	unsigned long bdi_thresh;
@@ -583,6 +584,25 @@ static void balance_dirty_pages(struct address_space *mapping,
 			bdi_dirty = bdi_stat(bdi, BDI_RECLAIMABLE) +
 				    bdi_stat(bdi, BDI_WRITEBACK);
 		}
+
+		/*
+		 * bdi_thresh takes time to ramp up from the initial 0,
+		 * especially for slow devices.
+		 *
+		 * It's possible that at the moment dirty throttling starts,
+		 * 	bdi_dirty = nr_dirty
+		 * 		  = (background_thresh + dirty_thresh) / 2
+		 * 		  >> bdi_thresh
+		 * Then the task could be blocked for a dozen second to flush
+		 * all the exceeded (bdi_dirty - bdi_thresh) pages. So offer a
+		 * complementary way to break out of the loop when 250ms worth
+		 * of dirty pages have been cleaned during our pause time.
+		 */
+		if (nr_dirty < dirty_thresh &&
+		    bdi_prev_dirty - bdi_dirty >
+		    bdi->write_bandwidth >> (PAGE_CACHE_SHIFT + 2))
+			break;
+		bdi_prev_dirty = bdi_dirty;
 
 		if (bdi_dirty >= bdi_thresh) {
 			pause = HZ/10;
