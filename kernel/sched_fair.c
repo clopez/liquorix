@@ -70,6 +70,11 @@ static unsigned int sched_nr_latency = 3;
 static unsigned int sched_nr_latency_max = 8;
 
 /*
+ * Runtime slice given to awakened sleepers.
+ */
+unsigned int sysctl_sched_sleeper_wakeup_slice = 2000000ULL;
+
+/*
  * After fork, child runs first. If set to 0 (default) then
  * parent will (try to) run first.
  */
@@ -784,6 +789,7 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int initial)
 			thresh >>= 1;
 
 		vruntime -= thresh;
+		se->sleeper_wakeup_slice = sysctl_sched_sleeper_wakeup_slice;
 	}
 
 	/* ensure we never gain time by being placed backwards. */
@@ -904,6 +910,11 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	 */
 	if (!sched_feat(WAKEUP_PREEMPT))
 		return;
+
+	if (delta_exec < curr->sleeper_wakeup_slice)
+		return;
+	else
+		curr->sleeper_wakeup_slice = 0;
 
 	if (delta_exec < __sched_gran(cfs_rq->nr_running))
 		return;
