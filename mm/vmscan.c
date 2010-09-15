@@ -311,20 +311,30 @@ static inline int is_page_cache_freeable(struct page *page)
 	return page_count(page) - page_has_private(page) == 2;
 }
 
-static int may_write_to_queue(struct backing_dev_info *bdi,
+enum bdi_queue_status {
+	QUEUEWRITE_DENIED,
+	QUEUEWRITE_CONGESTED,
+	QUEUEWRITE_ALLOWED,
+};
+
+static enum bdi_queue_status may_write_to_queue(struct backing_dev_info *bdi,
 			      struct scan_control *sc)
 {
+	enum bdi_queue_status ret = QUEUEWRITE_DENIED;
+
 	if (current->flags & PF_SWAPWRITE)
-		return 1;
+		return QUEUEWRITE_ALLOWED;
 	if (!bdi_write_congested(bdi))
-		return 1;
+		return QUEUEWRITE_ALLOWED;
+	else
+		ret = QUEUEWRITE_CONGESTED;
 	if (bdi == current->backing_dev_info)
-		return 1;
+		return QUEUEWRITE_ALLOWED;
 
 	/* lumpy reclaim for hugepage often need a lot of write */
 	if (sc->order > PAGE_ALLOC_COSTLY_ORDER)
-		return 1;
-	return 0;
+		return QUEUEWRITE_ALLOWED;
+	return ret;
 }
 
 /*
@@ -352,6 +362,8 @@ static void handle_write_error(struct address_space *mapping,
 typedef enum {
 	/* failed to write page out, page is locked */
 	PAGE_KEEP,
+	/* failed to write page out due to congestion, page is locked */
+	PAGE_KEEP_CONGESTED,
 	/* move page to the active list, page is locked */
 	PAGE_ACTIVATE,
 	/* page has been sent to the disk successfully, page is unlocked */
@@ -401,9 +413,14 @@ static pageout_t pageout(struct page *page, struct address_space *mapping,
 	}
 	if (mapping->a_ops->writepage == NULL)
 		return PAGE_ACTIVATE;
-	if (!may_write_to_queue(mapping->backing_dev_info, sc)) {
+	switch (may_write_to_queue(mapping->backing_dev_info, sc)) {
+	case QUEUEWRITE_CONGESTED:
+		return PAGE_KEEP_CONGESTED;
+	case QUEUEWRITE_DENIED:
 		disable_lumpy_reclaim_mode(sc);
 		return PAGE_KEEP;
+	case QUEUEWRITE_ALLOWED:
+		;
 	}
 
 	if (clear_page_dirty_for_io(page)) {
@@ -693,11 +710,14 @@ static noinline_for_stack void free_page_list(struct list_head *free_pages)
  * shrink_page_list() returns the number of reclaimed pages
  */
 static unsigned long shrink_page_list(struct list_head *page_list,
+				      struct zone *zone,
 				      struct scan_control *sc)
 {
 	LIST_HEAD(ret_pages);
 	LIST_HEAD(free_pages);
 	int pgactivate = 0;
+	unsigned long nr_dirty = 0;
+	unsigned long nr_congested = 0;
 	unsigned long nr_reclaimed = 0;
 
 	cond_resched();
@@ -717,6 +737,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 			goto keep;
 
 		VM_BUG_ON(PageActive(page));
+		VM_BUG_ON(page_zone(page) != zone);
 
 		sc->nr_scanned++;
 
@@ -794,6 +815,8 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		}
 
 		if (PageDirty(page)) {
+			nr_dirty++;
+
 			if (references == PAGEREF_RECLAIM_CLEAN)
 				goto keep_locked;
 			if (!may_enter_fs)
@@ -803,6 +826,8 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 
 			/* Page is dirty, try to write it out here */
 			switch (pageout(page, mapping, sc)) {
+			case PAGE_KEEP_CONGESTED:
+				nr_congested++;
 			case PAGE_KEEP:
 				goto keep_locked;
 			case PAGE_ACTIVATE:
@@ -913,6 +938,15 @@ keep_lumpy:
 		list_add(&page->lru, &ret_pages);
 		VM_BUG_ON(PageLRU(page) || PageUnevictable(page));
 	}
+
+	/*
+	 * Tag a zone as congested if all the dirty pages encountered were
+	 * backed by a congested BDI. In this case, reclaimers should just
+	 * back off and wait for congestion to clear because further reclaim
+	 * will encounter the same problem
+	 */
+	if (nr_dirty == nr_congested)
+		zone_set_flag(zone, ZONE_CONGESTED);
 
 	free_page_list(&free_pages);
 
@@ -1398,12 +1432,12 @@ shrink_inactive_list(unsigned long nr_to_scan, struct zone *zone,
 
 	spin_unlock_irq(&zone->lru_lock);
 
-	nr_reclaimed = shrink_page_list(&page_list, sc);
+	nr_reclaimed = shrink_page_list(&page_list, zone, sc);
 
 	/* Check if we should syncronously wait for writeback */
 	if (should_reclaim_stall(nr_taken, nr_reclaimed, priority, sc)) {
 		set_lumpy_reclaim_mode(priority, sc, true);
-		nr_reclaimed += shrink_page_list(&page_list, sc);
+		nr_reclaimed += shrink_page_list(&page_list, zone, sc);
 	}
 
 	local_irq_disable();
@@ -1973,8 +2007,26 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 
 		/* Take a nap, wait for some writeback to complete */
 		if (!sc->hibernation_mode && sc->nr_scanned &&
-		    priority < DEF_PRIORITY - 2)
-			congestion_wait(BLK_RW_ASYNC, HZ/10);
+		    priority < DEF_PRIORITY - 2) {
+			struct zone *active_zone = NULL;
+			unsigned long max_writeback = 0;
+			for_each_zone_zonelist(zone, z, zonelist,
+					gfp_zone(sc->gfp_mask)) {
+				unsigned long writeback;
+
+				/* Initialise for first zone */
+				if (active_zone == NULL)
+					active_zone = zone;
+
+				writeback = zone_page_state(zone, NR_WRITEBACK);
+				if (writeback > max_writeback) {
+					max_writeback = writeback;
+					active_zone = zone;
+				}
+			}
+
+			wait_iff_congested(active_zone, BLK_RW_ASYNC, HZ/10);
+		}
 	}
 
 out:
@@ -2283,6 +2335,15 @@ loop_again:
 				if (!zone_watermark_ok(zone, order,
 					    min_wmark_pages(zone), end_zone, 0))
 					has_under_min_watermark_zone = 1;
+			} else {
+				/*
+				 * If a zone reaches its high watermark,
+				 * consider it to be no longer congested. It's
+				 * possible there are dirty pages backed by
+				 * congested BDIs but as pressure is relieved,
+				 * spectulatively avoid congestion waits
+				 */
+				zone_clear_flag(zone, ZONE_CONGESTED);
 			}
 
 		}

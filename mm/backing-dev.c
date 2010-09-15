@@ -784,29 +784,36 @@ EXPORT_SYMBOL(congestion_wait);
 
 /**
  * wait_iff_congested - Conditionally wait for a backing_dev to become uncongested or a zone to complete writes
+ * @zone: A zone to check if it is heavily congested
  * @sync: SYNC or ASYNC IO
  * @timeout: timeout in jiffies
  *
- * In the event of a congested backing_dev (any backing_dev), this waits for up
- * to @timeout jiffies for either a BDI to exit congestion of the given @sync
- * queue.
+ * In the event of a congested backing_dev (any backing_dev) and the given
+ * @zone has experienced recent congestion, this waits for up to @timeout
+ * jiffies for either a BDI to exit congestion of the given @sync queue
+ * or a write to complete.
  *
- * If there is no congestion, then cond_resched() is called to yield the
- * processor if necessary but otherwise does not sleep.
+ * In the absense of zone congestion, cond_resched() is called to yield
+ * the processor if necessary but otherwise does not sleep.
  *
  * The return value is 0 if the sleep is for the full timeout. Otherwise,
  * it is the number of jiffies that were still remaining when the function
  * returned. return_value == timeout implies the function did not sleep.
  */
-long wait_iff_congested(int sync, long timeout)
+long wait_iff_congested(struct zone *zone, int sync, long timeout)
 {
 	long ret;
 	unsigned long start = jiffies;
 	DEFINE_WAIT(wait);
 	wait_queue_head_t *wqh = &congestion_wqh[sync];
 
-	/* If there is no congestion, yield if necessary instead of sleeping */
-	if (atomic_read(&nr_bdi_congested[sync]) == 0) {
+	/*
+	 * If there is no congestion, or heavy congestion is not being
+	 * encountered in the current zone, yield if necessary instead
+	 * of sleeping on the congestion queue
+	 */
+	if (atomic_read(&nr_bdi_congested[sync]) == 0 ||
+			!zone_is_reclaim_congested(zone)) {
 		cond_resched();
 
 		/* In case we scheduled, work out time remaining */
