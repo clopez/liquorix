@@ -331,10 +331,8 @@ static int sched_debug_show(struct seq_file *m, void *v)
 	P(jiffies);
 	PN(sysctl_sched_latency);
 	PN(sysctl_sched_min_granularity);
-	PN(sysctl_sched_std_granularity);
 	PN(sysctl_sched_wakeup_granularity);
 	PN(sysctl_sched_child_runs_first);
-	PN(sysctl_sched_sleeper_wakeup_slice);
 	P(sysctl_sched_features);
 #undef PN
 #undef P

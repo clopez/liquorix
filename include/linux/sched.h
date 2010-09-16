@@ -1166,7 +1166,6 @@ struct sched_entity {
 	u64			prev_sum_exec_runtime;
 
 	u64			nr_migrations;
-	unsigned long		sleeper_wakeup_slice;
 
 #ifdef CONFIG_SCHEDSTATS
 	struct sched_statistics statistics;
