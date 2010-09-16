@@ -36,8 +36,13 @@
  *  run vmstat and monitor the context-switches (cs) field)
  */
 
+#if defined(CONFIG_ZEN_DESKTOP)
+unsigned int sysctl_sched_latency = 3000000ULL;
+unsigned int normalized_sysctl_sched_latency = 3000000ULL;
+#else
 unsigned int sysctl_sched_latency = 6000000ULL;
 unsigned int normalized_sysctl_sched_latency = 6000000ULL;
+#endif
 
 /*
  * The initial- and re-scaling of tunables is configurable
@@ -52,28 +57,21 @@ enum sched_tunable_scaling sysctl_sched_tunable_scaling
 	= SCHED_TUNABLESCALING_LOG;
 
 /*
- * Minimum preemption granularity (when number of tasks increases).
- */
-unsigned int sysctl_sched_min_granularity = 750000ULL;
-unsigned int normalized_sysctl_sched_min_granularity = 750000ULL;
-
-/*
- * Standard preemption granularity for CPU-bound tasks:
+ * Minimal preemption granularity for CPU-bound tasks:
  * (default: 2 msec * (1 + ilog(ncpus)), units: nanoseconds)
  */
-unsigned int sysctl_sched_std_granularity = 2000000ULL;
-unsigned int normalized_sysctl_sched_std_granularity = 2000000ULL;
+#if defined(CONFIG_ZEN_DESKTOP)
+unsigned int sysctl_sched_min_granularity = 3750000ULL;
+unsigned int normalized_sysctl_sched_min_granularity = 3750000ULL;
+#else
+unsigned int sysctl_sched_min_granularity = 7500000ULL;
+unsigned int normalized_sysctl_sched_min_granularity = 7500000ULL;
+#endif
 
 /*
- * is kept at sysctl_sched_latency / sysctl_sched_std_granularity
+ * is kept at sysctl_sched_latency / sysctl_sched_min_granularity
  */
-static unsigned int sched_nr_latency = 3;
-static unsigned int sched_nr_latency_max = 8;
-
-/*
- * Runtime slice given to awakened sleepers.
- */
-unsigned int sysctl_sched_sleeper_wakeup_slice = 2000000ULL;
+static unsigned int sched_nr_latency = 8;
 
 /*
  * After fork, child runs first. If set to 0 (default) then
@@ -457,34 +455,22 @@ calc_delta_fair(unsigned long delta, struct sched_entity *se)
 /*
  * The idea is to set a period in which each task runs once.
  *
- * When there are too many tasks (sysctl_sched_nr_latency) we have to shrink the
- * slices, up to sysctl_sched_min_granularity.
+ * When there are too many tasks (sysctl_sched_nr_latency) we have to stretch
+ * this period because otherwise the slices get too small.
  *
  * p = (nr <= nl) ? l : l*nr/nl
  */
 static u64 __sched_period(unsigned long nr_running)
 {
-	unsigned long nr_latency_max = sched_nr_latency_max;
 	u64 period = sysctl_sched_latency;
-
-	if (unlikely(nr_running > nr_latency_max)) {
-		period = sysctl_sched_min_granularity;
-		period *= nr_running;
-	}
-	return period;
-}
-
-static unsigned int __sched_gran(unsigned long nr_running)
-{
-	unsigned int gran = sysctl_sched_std_granularity;
 	unsigned long nr_latency = sched_nr_latency;
 
 	if (unlikely(nr_running > nr_latency)) {
-		gran = sysctl_sched_latency;
-		gran /= nr_running;
-		gran = max(gran, sysctl_sched_min_granularity);
+		period = sysctl_sched_min_granularity;
+		period *= nr_running;
 	}
-	return gran;
+
+	return period;
 }
 
 /*
@@ -790,7 +776,6 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int initial)
 			thresh >>= 1;
 
 		vruntime -= thresh;
-		se->sleeper_wakeup_slice = sysctl_sched_sleeper_wakeup_slice;
 	}
 
 	/* ensure we never gain time by being placed backwards. */
@@ -912,19 +897,14 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	if (!sched_feat(WAKEUP_PREEMPT))
 		return;
 
-	if (delta_exec < curr->sleeper_wakeup_slice)
-		return;
-	else
-		curr->sleeper_wakeup_slice = 0;
-
-	if (delta_exec < __sched_gran(cfs_rq->nr_running))
+	if (delta_exec < sysctl_sched_min_granularity)
 		return;
 
 	if (cfs_rq->nr_running > 1) {
 		struct sched_entity *se = __pick_next_entity(cfs_rq);
 		s64 delta = curr->vruntime - se->vruntime;
 
-		if (delta > ideal_runtime)
+		if (delta > calc_delta_fair(ideal_runtime, curr))
 			resched_task(rq_of(cfs_rq)->curr);
 	}
 }
