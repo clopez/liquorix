@@ -407,12 +407,19 @@ static void zram_discard(struct zram *zram, struct bio *bio)
 	size_t bytes = bio->bi_size;
 	sector_t sector = bio->bi_sector;
 
+	if (unlikely(!zram->init_done))
+		goto out;
+
+	zram_inc_stat(zram, ZRAM_STAT_DISCARD);
+
 	while (bytes >= PAGE_SIZE) {
 		zram_free_page(zram, sector >> SECTORS_PER_PAGE_SHIFT);
 		sector += PAGE_SIZE >> SECTOR_SHIFT;
 		bytes -= PAGE_SIZE;
 	}
 
+out:
+	set_bit(BIO_UPTODATE, &bio->bi_flags);
 	bio_endio(bio, 0);
 }
 
@@ -421,16 +428,20 @@ static void zram_discard(struct zram *zram, struct bio *bio)
  */
 static inline int valid_io_request(struct zram *zram, struct bio *bio)
 {
+	int ret = 1;
+
 	if (unlikely(
 		(bio->bi_sector >= (zram->disksize >> SECTOR_SHIFT)) ||
 		(bio->bi_sector & (SECTORS_PER_PAGE - 1)) ||
 		(bio->bi_size & (PAGE_SIZE - 1)))) {
 
-		return 0;
+		ret = 0;	/* invalid I/O */
+		if (zram->init_done)
+			zram_inc_stat(zram, ZRAM_STAT_INVALID_IO);
 	}
 
 	/* I/O request is valid */
-	return 1;
+	return ret;
 }
 
 /*
@@ -442,13 +453,11 @@ static int zram_make_request(struct request_queue *queue, struct bio *bio)
 	struct zram *zram = queue->queuedata;
 
 	if (unlikely(!valid_io_request(zram, bio))) {
-		zram_inc_stat(zram, ZRAM_STAT_INVALID_IO);
 		bio_io_error(bio);
 		return 0;
 	}
 
 	if (unlikely(bio_rw_flagged(bio, BIO_RW_DISCARD))) {
-		zram_inc_stat(zram, ZRAM_STAT_DISCARD);
 		zram_discard(zram, bio);
 		return 0;
 	}
