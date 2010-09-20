@@ -457,7 +457,7 @@ static int zram_make_request(struct request_queue *queue, struct bio *bio)
 		return 0;
 	}
 
-	if (unlikely(bio_rw_flagged(bio, BIO_RW_DISCARD))) {
+	if (unlikely(bio->bi_rw & REQ_DISCARD)) {
 		zram_discard(zram, bio);
 		return 0;
 	}
