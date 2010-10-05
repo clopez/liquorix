@@ -405,8 +405,17 @@ void tick_nohz_stop_sched_tick(int inidle)
 		 * the scheduler tick in nohz_restart_sched_tick.
 		 */
 		if (!ts->tick_stopped) {
+#ifdef CONFIG_BFS
+			if (select_nohz_load_balancer(1)) {
+				/*
+				* sched tick not stopped!
+				*/
+				cpumask_clear_cpu(cpu, nohz_cpu_mask);
+				goto out;
+			}
+#else
 			select_nohz_load_balancer(1);
-
+#endif // CONFIG_BFS
 			ts->idle_tick = hrtimer_get_expires(&ts->sched_timer);
 			ts->tick_stopped = 1;
 			ts->idle_jiffies = last_jiffies;
