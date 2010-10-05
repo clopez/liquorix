@@ -172,6 +172,11 @@ struct global_rq {
 #ifdef CONFIG_SMP
 	unsigned long qnr; /* queued not running */
 	cpumask_t cpu_idle_map;
+	int idle_cpus;
+#endif
+#if BITS_PER_LONG < 64
+	unsigned long jiffies;
+	u64 jiffies_64;
 #endif
 };
 
@@ -548,6 +553,43 @@ static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
 #endif /* __ARCH_WANT_UNLOCKED_CTXSW */
 
 /*
+ * In order to have a monotonic clock that does not wrap we have a 64 bit
+ * unsigned long that's protected by grq.lock used in place of jiffies on
+ * 32 bit builds.
+ */
+#if BITS_PER_LONG < 64
+static inline void update_gjiffies(void)
+{
+	if (grq.jiffies != jiffies) {
+		grq_lock();
+		grq.jiffies = jiffies;
+		grq.jiffies_64++;
+		grq_unlock();
+	}
+}
+
+#define gjiffies (grq.jiffies_64)
+
+#else /* BITS_PER_LONG < 64 */
+static inline void update_gjiffies(void)
+{
+}
+
+#define gjiffies jiffies
+
+#endif /* BITS_PER_LONG < 64 */
+
+static inline int deadline_before(u64 deadline, u64 time)
+{
+	return (deadline < time);
+}
+
+static inline int deadline_after(u64 deadline, u64 time)
+{
+	return (deadline > time);
+}
+
+/*
  * A task that is queued but not running will be on the grq run list.
  * A task that is not running or queued will not be on the grq run list.
  * A task that is currently running will have ->oncpu set but not on the
@@ -670,21 +712,28 @@ static inline int queued_notrunning(void)
 }
 
 /*
- * The cpu_idle_map stores a bitmap of all the cpus currently idle to
- * allow easy lookup of whether any suitable idle cpus are available.
+ * The cpu_idle_map stores a bitmap of all the CPUs currently idle to
+ * allow easy lookup of whether any suitable idle CPUs are available.
+ * It's cheaper to maintain a binary yes/no if there are any idle CPUs on the
+ * idle_cpus variable than to do a full bitmask check when we are busy.
  */
 static inline void set_cpuidle_map(unsigned long cpu)
 {
 	cpu_set(cpu, grq.cpu_idle_map);
+	grq.idle_cpus = 1;
 }
 
 static inline void clear_cpuidle_map(unsigned long cpu)
 {
 	cpu_clear(cpu, grq.cpu_idle_map);
+	if (cpus_empty(grq.cpu_idle_map))
+		grq.idle_cpus = 0;
 }
 
 static int suitable_idle_cpus(struct task_struct *p)
 {
+	if (!grq.idle_cpus)
+		return 0;
 	return (cpus_intersects(p->cpus_allowed, grq.cpu_idle_map));
 }
 
@@ -1208,7 +1257,7 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 				  cache_distance(this_rq, rq, p);
 
 		if (rq_prio > highest_prio ||
-		    (time_after(offset_deadline, latest_deadline) ||
+		    (deadline_after(offset_deadline, latest_deadline) ||
 		    (offset_deadline == latest_deadline && this_rq == rq))) {
 			latest_deadline = offset_deadline;
 			highest_prio = rq_prio;
@@ -1217,7 +1266,8 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 	}
 
 	if (p->prio > highest_prio || (p->prio == highest_prio &&
-	    p->policy == SCHED_NORMAL && !time_before(p->deadline, latest_deadline)))
+	    p->policy == SCHED_NORMAL &&
+	    !deadline_before(p->deadline, latest_deadline)))
 		return;
 
 	/* p gets to preempt highest_prio_rq->curr */
@@ -1229,7 +1279,7 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 {
 	if (p->prio < uprq->rq_prio ||
 	    (p->prio == uprq->rq_prio && p->policy == SCHED_NORMAL &&
-	     time_before(p->deadline, uprq->rq_deadline)))
+	     deadline_before(p->deadline, uprq->rq_deadline)))
 		resched_task(uprq->curr);
 }
 #endif /* CONFIG_SMP */
@@ -1437,7 +1487,7 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 	unsigned long flags;
 	struct rq *rq;
 
-	rq = task_grq_lock(p, &flags); ;
+	rq = task_grq_lock(p, &flags);
 	p->state = TASK_RUNNING;
 	parent = p->parent;
 	/* Unnecessary but small chance that the parent changed CPU */
@@ -2275,6 +2325,7 @@ void scheduler_tick(void)
 	sched_clock_tick();
 	update_rq_clock(rq);
 	update_cpu_clock(rq, rq->curr, 1);
+	update_gjiffies();
 	if (!rq_idle(rq))
 		task_running_tick(rq);
 	else
@@ -2340,7 +2391,7 @@ EXPORT_SYMBOL(sub_preempt_count);
 #endif
 
 /*
- * Deadline is "now" in jiffies + (offset by priority). Setting the deadline
+ * Deadline is "now" in gjiffies + (offset by priority). Setting the deadline
  * is the key to everything. It distributes cpu fairly amongst tasks of the
  * same nice value, it proportions cpu according to nice level, it means the
  * task that last woke up the longest ago has the earliest deadline, thus
@@ -2376,7 +2427,7 @@ static inline void time_slice_expired(struct task_struct *p)
 {
 	reset_first_time_slice(p);
 	p->time_slice = timeslice();
-	p->deadline = jiffies + task_deadline_diff(p);
+	p->deadline = gjiffies + task_deadline_diff(p);
 }
 
 static inline void check_deadline(struct task_struct *p)
@@ -2402,22 +2453,16 @@ static inline void check_deadline(struct task_struct *p)
  * earliest deadline.
  * Finally if no SCHED_NORMAL tasks are found, SCHED_IDLEPRIO tasks are
  * selected by the earliest deadline.
- * Once deadlines are expired (jiffies has passed it) tasks are chosen in FIFO
- * order. Note that very few tasks will be FIFO for very long because they
- * only end up that way if they sleep for long or if if there are enough fully
- * cpu bound tasks to push the load to ~8 higher than the number of CPUs for
- * nice 0.
  */
 static inline struct
 task_struct *earliest_deadline_task(struct rq *rq, struct task_struct *idle)
 {
 	unsigned long dl, earliest_deadline = 0; /* Initialise to silence compiler */
-	struct task_struct *p, *edt;
+	struct task_struct *p, *edt = idle;
 	unsigned int cpu = cpu_of(rq);
 	struct list_head *queue;
 	int idx = 0;
 
-	edt = idle;
 retry:
 	idx = find_next_bit(grq.prio_bitmap, PRIO_LIMIT, idx);
 	if (idx >= PRIO_LIMIT)
@@ -2436,21 +2481,12 @@ retry:
 		dl = p->deadline + cache_distance(task_rq(p), rq, p);
 
 		/*
-		 * Look for tasks with old deadlines and pick them in FIFO
-		 * order, taking the first one found.
-		 */
-		if (time_is_before_jiffies(dl)) {
-			edt = p;
-			goto out_take;
-		}
-
-		/*
 		 * No rt tasks. Find the earliest deadline task. Now we're in
 		 * O(n) territory. This is what we silenced the compiler for:
 		 * edt will always start as idle.
 		 */
 		if (edt == idle ||
-		    time_before(dl, earliest_deadline)) {
+		    deadline_before(dl, earliest_deadline)) {
 			earliest_deadline = dl;
 			edt = p;
 		}
@@ -3325,7 +3361,8 @@ int task_prio(const struct task_struct *p)
 	if (prio <= 0)
 		goto out;
 
-	delta = (p->deadline - jiffies) * 40 / longest_deadline_diff();
+	delta = p->deadline - gjiffies;
+	delta = delta * 40 / longest_deadline_diff();
 	if (delta > 0 && delta <= 80)
 		prio += delta;
 	if (idleprio_task(p))
@@ -4565,7 +4602,8 @@ void move_task_off_dead_cpu(int dead_cpu, struct task_struct *p)
 
 }
 
-/* Schedules idle task to be the next runnable task on current CPU.
+/*
+ * Schedules idle task to be the next runnable task on current CPU.
  * It does so by boosting its priority to highest possible.
  * Used by CPU offline code.
  */
@@ -6535,8 +6573,12 @@ void __init sched_init(void)
 		prio_ratios[i] = prio_ratios[i - 1] * 11 / 10;
 
 	raw_spin_lock_init(&grq.lock);
+	grq.nr_running = grq.nr_uninterruptible = grq.nr_switches = 0;
+	grq.iso_ticks = grq.iso_refractory = 0;
 #ifdef CONFIG_SMP
 	init_defrootdomain();
+	grq.qnr = grq.idle_cpus = 0;
+	cpumask_clear(&grq.cpu_idle_map);
 #else
 	uprq = &per_cpu(runqueues, 0);
 #endif
