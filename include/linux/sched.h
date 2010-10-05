@@ -1216,6 +1216,7 @@ struct task_struct {
 	struct list_head run_list;
 	u64 last_ran;
 	u64 sched_time; /* sched_clock time spent running */
+	unsigned long threads_running;
 
 	unsigned long rt_timeout;
 #else /* CONFIG_SCHED_BFS */
