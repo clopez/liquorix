@@ -272,11 +272,23 @@ extern int runqueue_is_locked(int cpu);
 
 extern cpumask_var_t nohz_cpu_mask;
 #if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ)
+#ifdef CONFIG_BFS
+extern int select_nohz_load_balancer(int cpu);
+extern int get_nohz_load_balancer(void);
+#else
 extern void select_nohz_load_balancer(int stop_tick);
 extern int get_nohz_timer_target(void);
+#endif // CONFIG_BFS
 extern int nohz_ratelimit(int cpu);
 #else
+#ifdef CONFIG_BFS
+static inline int select_nohz_load_balancer(int cpu)
+{
+	return 0;
+}
+#else
 static inline void select_nohz_load_balancer(int stop_tick) { }
+#endif // CONFIG_BFS
 
 static inline int nohz_ratelimit(int cpu)
 {
