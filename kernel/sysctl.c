@@ -119,7 +119,7 @@ static int __maybe_unused one_hundred = 100;
 #ifdef CONFIG_SCHED_BFS
 extern int rr_interval;
 extern int sched_iso_cpu;
-static int __read_mostly five_thousand = 5000;
+static int __read_mostly one_thousand = 1000;
 #endif
 #ifdef CONFIG_PRINTK
 static int ten_thousand = 10000;
@@ -808,7 +808,7 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec_minmax,
 		.extra1		= &one,
-		.extra2		= &five_thousand,
+		.extra2		= &one_thousand,
 	},
 	{
 		.procname	= "iso_cpu",
