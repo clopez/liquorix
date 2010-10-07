@@ -40,8 +40,8 @@
 unsigned int sysctl_sched_latency = 3000000ULL;
 unsigned int normalized_sysctl_sched_latency = 3000000ULL;
 #else
-unsigned int sysctl_sched_latency = 8000000ULL;
-unsigned int normalized_sysctl_sched_latency = 8000000ULL;
+unsigned int sysctl_sched_latency = 6000000ULL;
+unsigned int normalized_sysctl_sched_latency = 6000000ULL;
 #endif
 
 /*
@@ -61,11 +61,11 @@ enum sched_tunable_scaling sysctl_sched_tunable_scaling
  * (default: 2 msec * (1 + ilog(ncpus)), units: nanoseconds)
  */
 #if defined(CONFIG_ZEN_DESKTOP)
-unsigned int sysctl_sched_min_granularity = 2625000ULL;
-unsigned int normalized_sysctl_sched_min_granularity = 2625000ULL;
+unsigned int sysctl_sched_min_granularity = 375000ULL;
+unsigned int normalized_sysctl_sched_min_granularity = 375000ULL;
 #else
-unsigned int sysctl_sched_min_granularity = 7500000ULL;
-unsigned int normalized_sysctl_sched_min_granularity = 7500000ULL;
+unsigned int sysctl_sched_min_granularity = 750000ULL;
+unsigned int normalized_sysctl_sched_min_granularity = 750000ULL;
 #endif
 
 /*
