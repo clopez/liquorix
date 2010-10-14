@@ -2030,6 +2030,7 @@ struct sd_lb_stats {
 	unsigned long this_load;
 	unsigned long this_load_per_task;
 	unsigned long this_nr_running;
+	unsigned long this_group_capacity;
 
 	/* Statistics of the busiest group */
 	unsigned long max_load;
@@ -2546,15 +2547,18 @@ static inline void update_sd_lb_stats(struct sched_domain *sd, int this_cpu,
 		/*
 		 * In case the child domain prefers tasks go to siblings
 		 * first, lower the sg capacity to one so that we'll try
-		 * and move all the excess tasks away.
+		 * and move all the excess tasks away. We lower capacity only
+		 * if the local group can handle the extra capacity.
 		 */
-		if (prefer_sibling)
+		if (prefer_sibling && !local_group &&
+		    sds->this_nr_running < sds->this_group_capacity)
 			sgs.group_capacity = min(sgs.group_capacity, 1UL);
 
 		if (local_group) {
 			sds->this_load = sgs.avg_load;
 			sds->this = sg;
 			sds->this_nr_running = sgs.sum_nr_running;
+			sds->this_group_capacity = sgs.group_capacity;
 			sds->this_load_per_task = sgs.sum_weighted_load;
 		} else if (update_sd_pick_busiest(sd, sds, sg, &sgs, this_cpu)) {
 			sds->max_load = sgs.avg_load;
