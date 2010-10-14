@@ -672,26 +672,11 @@ static int isoprio_suitable(void)
 	return !grq.iso_refractory;
 }
 
-static inline u64 task_deadline_diff(struct task_struct *p);
-
 /*
  * Adding to the global runqueue. Enter with grq locked.
  */
 static void enqueue_task(struct task_struct *p)
 {
-	s64 max_tdd;
-
-	max_tdd = task_deadline_diff(p);
-
-	/*
-	 * Make sure that when we're queueing this task again that it
-	 * doesn't have any old deadliens from when the program group was
-	 * being penalised and adjust the deadline to the highest it should
-	 * be, based on the current number of threads running.
-	 */
-	max_tdd *= p->group_leader->threads_running;
-	if (p->deadline - grq.niffies > max_tdd)
-		p->deadline = grq.niffies + max_tdd;
 	if (!rt_task(p)) {
 		/* Check it hasn't gotten rt from PI */
 		if ((idleprio_task(p) && idleprio_suitable(p)) ||
@@ -991,13 +976,10 @@ static int effective_prio(struct task_struct *p)
 }
 
 /*
- * activate_task - move a task to the runqueue. Enter with grq locked. The
- * number of threads running is stored in the group_leader struct.
+ * activate_task - move a task to the runqueue. Enter with grq locked.
  */
 static void activate_task(struct task_struct *p, struct rq *rq)
 {
-	unsigned long *threads_running = &p->group_leader->threads_running;
-
 	update_clocks(rq);
 
 	/*
@@ -1014,13 +996,6 @@ static void activate_task(struct task_struct *p, struct rq *rq)
 	p->prio = effective_prio(p);
 	if (task_contributes_to_load(p))
 		grq.nr_uninterruptible--;
-	/*
-	 * Adjust deadline according to number of running tasks/threads within
-	 * this program group. This ends up distributing CPU to the program
-	 * group as a single entity.
-	 */
-	if (++*threads_running > 1)
-		p->deadline += task_deadline_diff(p);
 	enqueue_task(p);
 	grq.nr_running++;
 	inc_qnr();
@@ -1032,13 +1007,9 @@ static void activate_task(struct task_struct *p, struct rq *rq)
  */
 static inline void deactivate_task(struct task_struct *p)
 {
-	unsigned long *threads_running = &p->group_leader->threads_running;
-
 	if (task_contributes_to_load(p))
 		grq.nr_uninterruptible++;
 	grq.nr_running--;
-	if (--*threads_running > 0)
-		p->deadline -= task_deadline_diff(p);
 }
 
 #ifdef CONFIG_SMP
@@ -2537,20 +2508,8 @@ static inline int ms_longest_deadline_diff(void)
  */
 static void time_slice_expired(struct task_struct *p)
 {
-	unsigned long *threads_running = &p->group_leader->threads_running;
-	u64 tdd = task_deadline_diff(p);
-
-	/*
-	 * We proportionately increase the deadline according to how many
-	 * threads are running. This effectively makes a thread group have
-	 * the same CPU as one task, no matter how many threads are running.
-	 * time_slice_expired can be called when there may be none running
-	 * when p is deactivated so we must explicitly test for more than 1.
-	 */
-	if (*threads_running > 1)
-		tdd *= *threads_running;
 	p->time_slice = timeslice();
-	p->deadline = grq.niffies + tdd;
+	p->deadline = grq.niffies + task_deadline_diff(p);
 }
 
 /*
@@ -3504,7 +3463,7 @@ SYSCALL_DEFINE1(nice, int, increment)
  *
  * This is the priority value as seen by users in /proc.
  * RT tasks are offset by -100. Normal tasks are centered around 1, value goes
- * from 0 (SCHED_ISO) up to ~900 (nice +19 SCHED_IDLEPRIO).
+ * from 0 (SCHED_ISO) up to 82 (nice +19 SCHED_IDLEPRIO).
  */
 int task_prio(const struct task_struct *p)
 {
@@ -3517,7 +3476,7 @@ int task_prio(const struct task_struct *p)
 	/* Convert to ms to avoid overflows */
 	delta = NS_TO_MS(p->deadline - grq.niffies);
 	delta = delta * 40 / ms_longest_deadline_diff();
-	if (delta > 0)
+	if (delta > 0 && delta <= 80)
 		prio += delta;
 	if (idleprio_task(p))
 		prio += 40;
