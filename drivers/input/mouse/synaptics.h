@@ -97,6 +97,8 @@ struct synaptics_hw_state {
 	signed char scroll;
 };
 
+struct synaptics_led;
+
 struct synaptics_data {
 	/* Data read from the touchpad */
 	unsigned long int model_id;		/* Model-ID */
@@ -110,6 +112,7 @@ struct synaptics_data {
 	unsigned char pkt_type;			/* packet type - old, new, etc */
 	unsigned char mode;			/* current mode byte */
 	int scroll;
+	struct synaptics_led *led;
 };
 
 void synaptics_module_init(void);
