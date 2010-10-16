@@ -154,6 +154,15 @@ int sched_iso_cpu __read_mostly = sched_iso_cpu_custom;
 #endif
 
 /*
+ * group_thread_accounting - sysctl to decide whether to treat whole thread
+ * groups as a single entity for the purposes of CPU distribution.
+ */
+int group_thread_accounting __read_mostly;
+
+/* fork_depth_penalty - Whether to penalise CPU according to fork depth. */
+int fork_depth_penalty __read_mostly = 1;
+
+/*
  * The relative length of deadline for each priority(nice) level.
  */
 static int prio_ratios[PRIO_RANGE] __read_mostly;
@@ -672,6 +681,7 @@ static int isoprio_suitable(void)
 	return !grq.iso_refractory;
 }
 
+static inline u64 __task_deadline_diff(struct task_struct *p);
 static inline u64 task_deadline_diff(struct task_struct *p);
 
 /*
@@ -679,19 +689,21 @@ static inline u64 task_deadline_diff(struct task_struct *p);
  */
 static void enqueue_task(struct task_struct *p)
 {
-	s64 max_tdd;
-
-	max_tdd = task_deadline_diff(p);
+	s64 max_tdd = task_deadline_diff(p);
 
 	/*
 	 * Make sure that when we're queueing this task again that it
-	 * doesn't have any old deadliens from when the program group was
-	 * being penalised and adjust the deadline to the highest it should
+	 * doesn't have any old deadlines from when the thread group was
+	 * being penalised and cap the deadline to the highest it could
 	 * be, based on the current number of threads running.
 	 */
-	max_tdd *= p->group_leader->threads_running;
-	if (p->deadline - grq.niffies > max_tdd)
-		p->deadline = grq.niffies + max_tdd;
+	if (group_thread_accounting) {
+		max_tdd += p->group_leader->threads_running *
+			   __task_deadline_diff(p);
+	}
+	if (p->deadline - p->deadline_niffy > max_tdd)
+		p->deadline = p->deadline_niffy + max_tdd;
+
 	if (!rt_task(p)) {
 		/* Check it hasn't gotten rt from PI */
 		if ((idleprio_task(p) && idleprio_suitable(p)) ||
@@ -1015,12 +1027,13 @@ static void activate_task(struct task_struct *p, struct rq *rq)
 	if (task_contributes_to_load(p))
 		grq.nr_uninterruptible--;
 	/*
-	 * Adjust deadline according to number of running tasks/threads within
-	 * this program group. This ends up distributing CPU to the program
+	 * Adjust deadline according to number of running threads within
+	 * this thread group. This ends up distributing CPU to the thread
 	 * group as a single entity.
 	 */
-	if (++*threads_running > 1)
-		p->deadline += task_deadline_diff(p);
+	++*threads_running;
+	if (*threads_running > 1 && group_thread_accounting)
+		p->deadline += __task_deadline_diff(p);
 	enqueue_task(p);
 	grq.nr_running++;
 	inc_qnr();
@@ -1037,8 +1050,9 @@ static inline void deactivate_task(struct task_struct *p)
 	if (task_contributes_to_load(p))
 		grq.nr_uninterruptible++;
 	grq.nr_running--;
-	if (--*threads_running > 0)
-		p->deadline -= task_deadline_diff(p);
+	--*threads_running;
+	if (*threads_running > 0 && group_thread_accounting)
+		p->deadline -= __task_deadline_diff(p);
 }
 
 #ifdef CONFIG_SMP
@@ -1622,6 +1636,10 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 	parent = p->parent;
 	/* Unnecessary but small chance that the parent changed CPU */
 	set_task_cpu(p, task_cpu(parent));
+	if (!(clone_flags & CLONE_THREAD)) {
+		p->fork_depth++;
+		p->threads_running = 0;
+	}
 	activate_task(p, rq);
 	trace_sched_wakeup_new(p, 1);
 	if (!(clone_flags & CLONE_VM) && rq->curr == parent &&
@@ -2516,9 +2534,18 @@ static inline u64 prio_deadline_diff(int user_prio)
 	return (prio_ratios[user_prio] * rr_interval * (MS_TO_NS(1) / 128));
 }
 
-static inline u64 task_deadline_diff(struct task_struct *p)
+static inline u64 __task_deadline_diff(struct task_struct *p)
 {
 	return prio_deadline_diff(TASK_USER_PRIO(p));
+}
+
+static inline u64 task_deadline_diff(struct task_struct *p)
+{
+	u64 pdd = __task_deadline_diff(p);
+
+	if (fork_depth_penalty && p->fork_depth > 1)
+		pdd *= p->fork_depth;
+	return pdd;
 }
 
 static inline u64 static_deadline_diff(int static_prio)
@@ -2537,7 +2564,6 @@ static inline int ms_longest_deadline_diff(void)
  */
 static void time_slice_expired(struct task_struct *p)
 {
-	unsigned long *threads_running = &p->group_leader->threads_running;
 	u64 tdd = task_deadline_diff(p);
 
 	/*
@@ -2547,9 +2573,14 @@ static void time_slice_expired(struct task_struct *p)
 	 * time_slice_expired can be called when there may be none running
 	 * when p is deactivated so we must explicitly test for more than 1.
 	 */
-	if (*threads_running > 1)
-		tdd *= *threads_running;
+	if (group_thread_accounting) {
+		unsigned long *threads_running = &p->group_leader->threads_running;
+
+		if (*threads_running > 1)
+			tdd += *threads_running * __task_deadline_diff(p);
+	}
 	p->time_slice = timeslice();
+	p->deadline_niffy = grq.niffies;
 	p->deadline = grq.niffies + tdd;
 }
 
@@ -3504,7 +3535,7 @@ SYSCALL_DEFINE1(nice, int, increment)
  *
  * This is the priority value as seen by users in /proc.
  * RT tasks are offset by -100. Normal tasks are centered around 1, value goes
- * from 0 (SCHED_ISO) up to ~900 (nice +19 SCHED_IDLEPRIO).
+ * from 0 (SCHED_ISO) upwards (to nice +19 SCHED_IDLEPRIO).
  */
 int task_prio(const struct task_struct *p)
 {
@@ -3516,7 +3547,11 @@ int task_prio(const struct task_struct *p)
 
 	/* Convert to ms to avoid overflows */
 	delta = NS_TO_MS(p->deadline - grq.niffies);
-	delta = delta * 40 / ms_longest_deadline_diff();
+	if (fork_depth_penalty)
+		delta *= 4;
+	else
+		delta *= 40;
+	delta /= ms_longest_deadline_diff();
 	if (delta > 0)
 		prio += delta;
 	if (idleprio_task(p))
