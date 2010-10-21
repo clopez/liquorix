@@ -2219,7 +2219,7 @@ static inline void flush_unauthorized_files(const struct cred *cred,
 
 	tty = get_current_tty();
 	if (tty) {
-		file_list_lock();
+		spin_lock(&tty_files_lock);
 		if (!list_empty(&tty->tty_files)) {
 			struct inode *inode;
 
@@ -2235,7 +2235,7 @@ static inline void flush_unauthorized_files(const struct cred *cred,
 				drop_tty = 1;
 			}
 		}
-		file_list_unlock();
+		spin_unlock(&tty_files_lock);
 		tty_kref_put(tty);
 	}
 	/* Reset controlling tty. */
