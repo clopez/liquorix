@@ -346,6 +346,7 @@ void file_kill(struct file *file)
 		file_list_unlock();
 	}
 }
+EXPORT_SYMBOL(file_kill);
 
 int fs_may_remount_ro(struct super_block *sb)
 {
