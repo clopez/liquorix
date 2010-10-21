@@ -185,6 +185,7 @@ void free_tty_struct(struct tty_struct *tty)
 {
 	kfree(tty->write_buf);
 	tty_buffer_free_all(tty);
+	sched_autogroup_destroy_tty(tty);
 	kfree(tty);
 }
 
@@ -2823,6 +2824,7 @@ void initialize_tty_struct(struct tty_struct *tty,
 	tty->ops = driver->ops;
 	tty->index = idx;
 	tty_line_name(driver, idx, tty->name);
+	sched_autogroup_create_tty(tty);
 }
 
 /**
