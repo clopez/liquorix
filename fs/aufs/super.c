@@ -21,6 +21,7 @@
  */
 
 #include <linux/buffer_head.h>
+#include <linux/jiffies.h>
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/statfs.h>
@@ -123,11 +124,13 @@ static void au_show_wbr_create(struct seq_file *m, int v,
 		break;
 	case AuWbrCreate_MFSV:
 		seq_printf(m, /*pat*/"mfs:%lu",
-			   sbinfo->si_wbr_mfs.mfs_expire / HZ);
+			   jiffies_to_msecs(sbinfo->si_wbr_mfs.mfs_expire)
+			   / MSEC_PER_SEC);
 		break;
 	case AuWbrCreate_PMFSV:
 		seq_printf(m, /*pat*/"pmfs:%lu",
-			   sbinfo->si_wbr_mfs.mfs_expire / HZ);
+			   jiffies_to_msecs(sbinfo->si_wbr_mfs.mfs_expire)
+			   / MSEC_PER_SEC);
 		break;
 	case AuWbrCreate_MFSRR:
 		seq_printf(m, /*pat*/"mfsrr:%llu",
@@ -136,7 +139,8 @@ static void au_show_wbr_create(struct seq_file *m, int v,
 	case AuWbrCreate_MFSRRV:
 		seq_printf(m, /*pat*/"mfsrr:%llu:%lu",
 			   sbinfo->si_wbr_mfs.mfsrr_watermark,
-			   sbinfo->si_wbr_mfs.mfs_expire / HZ);
+			   jiffies_to_msecs(sbinfo->si_wbr_mfs.mfs_expire)
+			   / MSEC_PER_SEC);
 		break;
 	}
 }
@@ -248,7 +252,7 @@ static int aufs_show_options(struct seq_file *m, struct vfsmount *mnt)
 
 	AuUInt(DIRWH, dirwh, sbinfo->si_dirwh);
 
-	n = sbinfo->si_rdcache / HZ;
+	n = jiffies_to_msecs(sbinfo->si_rdcache) / MSEC_PER_SEC;
 	AuUInt(RDCACHE, rdcache, n);
 
 	AuUInt(RDBLK, rdblk, sbinfo->si_rdblk);
@@ -363,26 +367,6 @@ static int aufs_statfs(struct dentry *dentry, struct kstatfs *buf)
 
 /* ---------------------------------------------------------------------- */
 
-/*
- * this IS NOT for super_operations.
- * I guess it will be reverted someday.
- */
-static void aufs_umount_begin(struct super_block *sb)
-{
-	struct au_sbinfo *sbinfo;
-
-	sbinfo = au_sbi(sb);
-	if (!sbinfo)
-		return;
-
-	si_write_lock(sb);
-	if (au_opt_test(au_mntflags(sb), PLINK))
-		au_plink_put(sb);
-	if (sbinfo->si_wbr_create_ops->fin)
-		sbinfo->si_wbr_create_ops->fin(sb);
-	si_write_unlock(sb);
-}
-
 /* final actions when unmounting a file system */
 static void aufs_put_super(struct super_block *sb)
 {
@@ -392,7 +376,6 @@ static void aufs_put_super(struct super_block *sb)
 	if (!sbinfo)
 		return;
 
-	aufs_umount_begin(sb);
 	dbgaufs_si_fin(sbinfo);
 	kobject_put(&sbinfo->si_kobj);
 }
@@ -633,9 +616,12 @@ static int aufs_remount_fs(struct super_block *sb, int *flags, char *data)
 	err = 0;
 	root = sb->s_root;
 	if (!data || !*data) {
-		aufs_write_lock(root);
-		err = au_opts_verify(sb, *flags, /*pending*/0);
-		aufs_write_unlock(root);
+		err = si_write_lock(sb, AuLock_FLUSH | AuLock_NOPLM);
+		if (!err) {
+			di_write_lock_child(root);
+			err = au_opts_verify(sb, *flags, /*pending*/0);
+			aufs_write_unlock(root);
+		}
 		goto out;
 	}
 
@@ -656,7 +642,10 @@ static int aufs_remount_fs(struct super_block *sb, int *flags, char *data)
 	sbinfo = au_sbi(sb);
 	inode = root->d_inode;
 	mutex_lock(&inode->i_mutex);
-	aufs_write_lock(root);
+	err = si_write_lock(sb, AuLock_FLUSH | AuLock_NOPLM);
+	if (unlikely(err))
+		goto out_mtx;
+	di_write_lock_child(root);
 
 	/* au_opts_remount() may return an error */
 	err = au_opts_remount(sb, &opts);
@@ -673,8 +662,9 @@ static int aufs_remount_fs(struct super_block *sb, int *flags, char *data)
 	}
 
 	aufs_write_unlock(root);
-	mutex_unlock(&inode->i_mutex);
 
+out_mtx:
+	mutex_unlock(&inode->i_mutex);
 out_opts:
 	free_page((unsigned long)opts.opt);
 out:
@@ -731,7 +721,6 @@ static int alloc_root(struct super_block *sb)
 
 out_iput:
 	iget_failed(inode);
-	iput(inode);
 out:
 	return err;
 
@@ -829,11 +818,37 @@ static int aufs_get_sb(struct file_system_type *fs_type, int flags,
 	err = get_sb_nodev(fs_type, flags, raw_data, aufs_fill_super, mnt);
 	if (!err) {
 		sb = mnt->mnt_sb;
-		si_write_lock(sb);
+		si_write_lock(sb, !AuLock_FLUSH);
 		sysaufs_brs_add(sb, 0);
 		si_write_unlock(sb);
+		au_sbilist_add(sb);
 	}
 	return err;
+}
+
+static void aufs_kill_sb(struct super_block *sb)
+{
+	struct au_sbinfo *sbinfo;
+
+	sbinfo = au_sbi(sb);
+	if (sbinfo) {
+		au_sbilist_del(sb);
+		aufs_write_lock(sb->s_root);
+		if (sbinfo->si_wbr_create_ops->fin)
+			sbinfo->si_wbr_create_ops->fin(sb);
+		if (au_opt_test(sbinfo->si_mntflags, UDBA_HNOTIFY)) {
+			au_opt_set_udba(sbinfo->si_mntflags, UDBA_NONE);
+			au_remount_refresh(sb, /*flags*/0);
+		}
+		if (au_opt_test(sbinfo->si_mntflags, PLINK))
+			au_plink_put(sb, /*verbose*/1);
+		au_xino_clr(sb);
+		aufs_write_unlock(sb->s_root);
+
+		au_plink_maint_leave(sbinfo);
+		au_nwt_flush(&sbinfo->si_nowait);
+	}
+	generic_shutdown_super(sb);
 }
 
 struct file_system_type aufs_fs_type = {
@@ -842,7 +857,7 @@ struct file_system_type aufs_fs_type = {
 		FS_RENAME_DOES_D_MOVE	/* a race between rename and others */
 		| FS_REVAL_DOT,		/* for NFS branch and udba */
 	.get_sb		= aufs_get_sb,
-	.kill_sb	= generic_shutdown_super,
+	.kill_sb	= aufs_kill_sb,
 	/* no need to __module_get() and module_put(). */
 	.owner		= THIS_MODULE,
 };

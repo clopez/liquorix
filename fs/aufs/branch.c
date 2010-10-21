@@ -436,7 +436,6 @@ static void au_br_do_add(struct super_block *sb, struct dentry *h_dentry,
 
 	root = sb->s_root;
 	root_inode = root->d_inode;
-	au_plink_maint_block(sb);
 	bend = au_sbend(sb);
 	amount = bend + 1 - bindex;
 	au_br_do_add_brp(au_sbi(sb), bindex, br, bend, amount);
@@ -714,7 +713,6 @@ static void au_br_do_del(struct super_block *sb, aufs_bindex_t bindex,
 
 	root = sb->s_root;
 	inode = root->d_inode;
-	au_plink_maint_block(sb);
 	sbinfo = au_sbi(sb);
 	bend = sbinfo->si_bend;
 
@@ -759,8 +757,7 @@ int au_br_del(struct super_block *sb, struct au_opt_del *del, int remount)
 	i = atomic_read(&br->br_count);
 	if (unlikely(i)) {
 		AuVerbose(verbose, "%d file(s) opened\n", i);
-		if (!verbose)
-			goto out;
+		goto out;
 	}
 
 	wbr = br->br_wbr;
@@ -823,7 +820,7 @@ static void au_warn_ima(void)
 {
 #ifdef CONFIG_IMA
 	/* since it doesn't support mark_files_ro() */
-	pr_warning("RW -> RO makes IMA to produce wrong message");
+	AuWarn1("RW -> RO makes IMA to produce wrong message");
 #endif
 }
 
@@ -842,8 +839,11 @@ static int au_br_mod_files_ro(struct super_block *sb, aufs_bindex_t bindex)
 {
 	int err;
 	unsigned long n, ul, bytes, files;
-	aufs_bindex_t bstart;
+	aufs_bindex_t br_id;
 	struct file *file, *hf, **a;
+	struct dentry *dentry;
+	struct inode *inode;
+	struct au_hfile *hfile;
 	const int step_bytes = 1024, /* memory allocation unit */
 		step_files = step_bytes / sizeof(*a);
 
@@ -856,9 +856,12 @@ static int au_br_mod_files_ro(struct super_block *sb, aufs_bindex_t bindex)
 		goto out;
 
 	/* no need file_list_lock() since sbinfo is locked? defered? */
+	br_id = au_sbr_id(sb, bindex);
 	list_for_each_entry(file, &sb->s_files, f_u.fu_list) {
 		if (special_file(file->f_dentry->d_inode->i_mode))
 			continue;
+		dentry = file->f_dentry;
+		inode = dentry->d_inode;
 
 		AuDbg("%.*s\n", AuDLNPair(file->f_dentry));
 		fi_read_lock(file);
@@ -869,16 +872,17 @@ static int au_br_mod_files_ro(struct super_block *sb, aufs_bindex_t bindex)
 			goto out_free;
 		}
 
-		bstart = au_fbstart(file);
-		if (!S_ISREG(file->f_dentry->d_inode->i_mode)
+		hfile = &au_fi(file)->fi_htop;
+		hf = hfile->hf_file;
+		if (!S_ISREG(inode->i_mode)
 		    || !(file->f_mode & FMODE_WRITE)
-		    || bstart != bindex) {
+		    || hfile->hf_br->br_id != br_id
+		    || !(hf->f_mode & FMODE_WRITE)) {
 			FiMustNoWaiters(file);
 			fi_read_unlock(file);
 			continue;
 		}
 
-		hf = au_hf_top(file);
 		FiMustNoWaiters(file);
 		fi_read_unlock(file);
 
@@ -929,7 +933,6 @@ int au_br_mod(struct super_block *sb, struct au_opt_mod *mod, int remount,
 	struct au_branch *br;
 
 	root = sb->s_root;
-	au_plink_maint_block(sb);
 	bindex = au_find_dbindex(root, mod->h_root);
 	if (bindex < 0) {
 		if (remount)
