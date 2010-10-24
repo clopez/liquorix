@@ -124,9 +124,13 @@ enum hrtimer_restart it_real_fn(struct hrtimer *timer)
 		container_of(timer, struct signal_struct, real_timer);
 
 	trace_itimer_expire(ITIMER_REAL, sig->leader_pid, 0);
+#ifdef CONFIG_SCHED_CFS
 	sched_wake_timer_enable();
+#endif
 	kill_pid_info(SIGALRM, SEND_SIG_PRIV, sig->leader_pid);
+#ifdef CONFIG_SCHED_CFS
 	sched_wake_timer_disable();
+#endif
 
 	return HRTIMER_NORESTART;
 }

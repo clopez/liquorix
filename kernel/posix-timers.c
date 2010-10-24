@@ -402,7 +402,9 @@ static enum hrtimer_restart posix_timer_fn(struct hrtimer *timer)
 	int si_private = 0;
 	enum hrtimer_restart ret = HRTIMER_NORESTART;
 
+#ifdef CONFIG_SCHED_CFS
 	sched_wake_timer_enable();
+#endif
 	timr = container_of(timer, struct k_itimer, it.real.timer);
 	spin_lock_irqsave(&timr->it_lock, flags);
 
@@ -457,7 +459,9 @@ static enum hrtimer_restart posix_timer_fn(struct hrtimer *timer)
 	}
 
 	unlock_timer(timr, flags);
+#ifdef CONFIG_SCHED_CFS
 	sched_wake_timer_disable();
+#endif
 	return ret;
 }
 

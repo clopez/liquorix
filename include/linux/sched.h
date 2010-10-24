@@ -1024,6 +1024,7 @@ struct sched_domain;
 /*
  * wake flags
  */
+#ifdef CONFIG_SCHED_CFS
 #define WF_SYNC		(1 << 0)	/* waker goes to sleep after wakup */
 #define WF_FORK		(1 << 1)	/* child wakeup after fork */
 #define WF_INTERACTIVE	(1 << 2)	/* interactivity-driven wakeup */
@@ -1037,6 +1038,17 @@ struct sched_domain;
 #define ENQUEUE_TIMER	(1 << 5)
 
 #define DEQUEUE_SLEEP	(1 << 0)
+
+#else
+#define WF_SYNC		0x01		/* waker goes to sleep after wakup */
+#define WF_FORK		0x02		/* child wakeup after fork */
+
+#define ENQUEUE_WAKEUP		1
+#define ENQUEUE_WAKING		2
+#define ENQUEUE_HEAD		4
+
+#define DEQUEUE_SLEEP		1
+#endif
 
 struct sched_class {
 	const struct sched_class *next;
@@ -1129,10 +1141,14 @@ struct sched_entity {
 	struct load_weight	load;		/* for load-balancing */
 	struct rb_node		run_node;
 	struct list_head	group_node;
+#ifdef CONFIG_SCHED_CFS
 	unsigned int		on_rq:1,
 				interactive:1,
 				timer:1,
 				fork_expedited:1;
+#else
+	unsigned int		on_rq;
+#endif
 
 	u64			exec_start;
 	u64			sum_exec_runtime;
@@ -1259,8 +1275,10 @@ struct task_struct {
 	unsigned sched_in_iowait:1;		/* Called io_schedule() */
 	unsigned sched_reset_on_fork:1;		/* Revert to default
 						 * priority/policy on fork */
+#ifdef CONFIG_SCHED_CFS
 	unsigned sched_wake_interactive:4;	/* User-driven wakeup */
 	unsigned sched_wake_timer:4;		/* Timer-driven wakeup */
+#endif
 
 	pid_t pid;
 	pid_t tgid;
@@ -1526,6 +1544,7 @@ struct task_struct {
 #endif
 };
 
+#ifdef CONFIG_SCHED_CFS
 static inline void sched_wake_interactive_enable(void)
 {
 	current->sched_wake_interactive++;
@@ -1545,6 +1564,7 @@ static inline void sched_wake_timer_disable(void)
 {
 	current->sched_wake_timer--;
 }
+#endif
 
 #ifdef CONFIG_SCHED_BFS
 extern int grunqueue_is_locked(void);
