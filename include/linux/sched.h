@@ -1187,15 +1187,10 @@ struct task_struct {
 	unsigned int rt_priority;
 #ifdef CONFIG_SCHED_BFS
 	int time_slice;
-	/* Virtual deadline in niffies, and when the deadline was set */
-	u64 deadline, deadline_niffy;
+	u64 deadline;
 	struct list_head run_list;
 	u64 last_ran;
 	u64 sched_time; /* sched_clock time spent running */
-	/* Number of threads currently requesting CPU time */
-	unsigned long threads_running;
-	/* Depth of forks from init */
-	int fork_depth;
 
 	unsigned long rt_timeout;
 #else /* CONFIG_SCHED_BFS */
