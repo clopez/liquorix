@@ -1072,7 +1072,7 @@ struct sched_class {
 					 struct task_struct *task);
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
-	void (*task_move_group) (struct task_struct *p, int on_rq);
+	void (*moved_group) (struct task_struct *p, int on_rq);
 #endif
 };
 
@@ -1899,20 +1899,6 @@ int sched_rt_handler(struct ctl_table *table, int write,
 		loff_t *ppos);
 
 extern unsigned int sysctl_sched_compat_yield;
-
-#ifdef CONFIG_SCHED_AUTOGROUP
-int sched_autogroup_handler(struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp,
-		loff_t *ppos);
-
-extern unsigned int sysctl_sched_autogroup_enabled;
-
-void sched_autogroup_create_tty(struct tty_struct *tty);
-void sched_autogroup_destroy_tty(struct tty_struct *tty);
-#else
-static inline void sched_autogroup_create_tty(struct tty_struct *tty) { }
-static inline void sched_autogroup_destroy_tty(struct tty_struct *tty) { }
-#endif
 
 #ifdef CONFIG_RT_MUTEXES
 extern int rt_mutex_getprio(struct task_struct *p);
