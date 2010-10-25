@@ -114,6 +114,15 @@ config LOCALVERSION_AUTO
 
 	  which is done within the script "scripts/setlocalversion".)
 
+config LOCALVERSION_AUTO_PLUS
+       bool "Automatically append a plus sign at the end of the version string"
+       default y
+       depends on !LOCALVERSION_AUTO
+       help
+         This will automatically add a plus sign ("+") at the end of the version
+         if the repository is not in a clean (tagged) state.
+         If unsure, say Y
+
 config HAVE_KERNEL_GZIP
 	bool
 
