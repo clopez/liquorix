@@ -28,6 +28,8 @@
 #include "tuxonice_builtin.h"
 #include "tuxonice_power_off.h"
 
+unsigned long toi_bootflags_mask;
+
 /*
  * Highmem related functions (x86 only).
  */
@@ -337,6 +339,7 @@ __setup("toi_translate_retry", toi_translate_retry_setup);
 static int __init toi_debug_setup(char *str)
 {
 	toi_bkd.toi_action |= (1 << TOI_LOGALL);
+	toi_bootflags_mask |= (1 << TOI_LOGALL);
 	toi_bkd.toi_debug_state = 255;
 	toi_bkd.toi_default_console_level = 7;
 	return 1;
@@ -347,6 +350,7 @@ __setup("toi_debug_setup", toi_debug_setup);
 static int __init toi_pause_setup(char *str)
 {
 	toi_bkd.toi_action |= (1 << TOI_PAUSE);
+	toi_bootflags_mask |= (1 << TOI_PAUSE);
 	return 1;
 }
 
@@ -364,15 +368,15 @@ static int __init toi_ignore_late_initcall_setup(char *str)
 
 __setup("toi_initramfs_resume_only", toi_ignore_late_initcall_setup);
 
-int toi_force_no_multithreaded;
-EXPORT_SYMBOL_GPL(toi_force_no_multithreaded);
-
 static int __init toi_force_no_multithreaded_setup(char *str)
 {
 	int value;
 
-	if (sscanf(str, "=%d", &value))
-		toi_force_no_multithreaded = value;
+	toi_bkd.toi_action &= ~(1 << TOI_NO_MULTITHREADED_IO);
+	toi_bootflags_mask |= (1 << TOI_NO_MULTITHREADED_IO);
+
+	if (sscanf(str, "=%d", &value) && value)
+		toi_bkd.toi_action |= (1 << TOI_NO_MULTITHREADED_IO);
 
 	return 1;
 }

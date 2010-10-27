@@ -779,8 +779,7 @@ static int do_rw_loop(int write, int finish_at, struct memory_bitmap *pageflags,
 
 	clear_toi_state(TOI_IO_STOPPED);
 
-	if (!test_action_state(TOI_NO_MULTITHREADED_IO) &&
-		(write || !toi_force_no_multithreaded))
+	if (!test_action_state(TOI_NO_MULTITHREADED_IO))
 		num_other_threads = start_other_threads();
 
 	if (!num_other_threads || !toiActiveAllocator->io_flusher ||
@@ -1603,7 +1602,9 @@ static int __read_pageset1(void)
 		(char *) &toi_header->pagedir, sizeof(pagedir1));
 	toi_result = toi_header->param0;
 	if (!toi_bkd.toi_debug_state) {
-		toi_bkd.toi_action = toi_header->param1;
+		toi_bkd.toi_action =
+			(toi_header->param1 & ~toi_bootflags_mask) |
+			(toi_bkd.toi_action & toi_bootflags_mask);
 		toi_bkd.toi_debug_state = toi_header->param2;
 		toi_bkd.toi_default_console_level = toi_header->param3;
 	}
