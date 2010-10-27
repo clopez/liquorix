@@ -382,3 +382,17 @@ static int __init toi_force_no_multithreaded_setup(char *str)
 }
 
 __setup("toi_no_multithreaded", toi_force_no_multithreaded_setup);
+
+static int __init toi_post_resume_breakpoint_setup(char *str)
+{
+	int value;
+
+	toi_bkd.toi_action &= ~(1 << TOI_POST_RESUME_BREAKPOINT);
+	toi_bootflags_mask |= (1 << TOI_POST_RESUME_BREAKPOINT);
+	if (sscanf(str, "=%d", &value) && value)
+		toi_bkd.toi_action |= (1 << TOI_POST_RESUME_BREAKPOINT);
+
+	return 1;
+}
+
+__setup("toi_post_resume_break", toi_post_resume_breakpoint_setup);

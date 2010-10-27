@@ -75,6 +75,7 @@
 #include <linux/writeback.h>
 #include <linux/uaccess.h> /* for get/set_fs & KERNEL_DS on i386 */
 #include <linux/bio.h>
+#include <linux/kgdb.h>
 
 #include "tuxonice.h"
 #include "tuxonice_modules.h"
@@ -673,6 +674,10 @@ static int __save_image(void)
 		goto Failed;
 
 	temp_result = toi_hibernate();
+
+	if (test_action_state(TOI_POST_RESUME_BREAKPOINT))
+		kgdb_breakpoint();
+
 	if (!temp_result)
 		did_copy = 1;
 
@@ -1228,6 +1233,8 @@ static struct toi_sysfs_data sysfs_params[] = {
 			tuxonice_signature, 9, 0, NULL),
 	SYSFS_INT("max_workers", SYSFS_RW, &toi_max_workers, 0, NR_CPUS, 0,
 			NULL),
+	SYSFS_BIT("post_resume_breakpoint", SYSFS_RW, &toi_bkd.toi_action,
+			TOI_POST_RESUME_BREAKPOINT, 0),
 #ifdef CONFIG_TOI_KEEP_IMAGE
 	SYSFS_BIT("keep_image", SYSFS_RW , &toi_bkd.toi_action, TOI_KEEP_IMAGE,
 			0),
