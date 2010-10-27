@@ -29,6 +29,7 @@
 #include "tuxonice_power_off.h"
 
 unsigned long toi_bootflags_mask;
+EXPORT_SYMBOL_GPL(toi_bootflags_mask);
 
 /*
  * Highmem related functions (x86 only).
