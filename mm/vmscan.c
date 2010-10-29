@@ -619,8 +619,15 @@ static enum page_references page_check_references(struct page *page,
 		 * quickly recovered.
 		 */
 		SetPageReferenced(page);
-
-		if (referenced_page)
+		/*
+		 * Identify pte referenced and file-backed pages and give them
+		 * one trip around the active list. So that executable code get
+		 * better chances to stay in memory under moderate memory
+		 * pressure. JVM can create lots of anon VM_EXEC pages, so we
+		 * ignore them here.
+		 */
+		if (referenced_page || ((vm_flags & VM_EXEC) &&
+		    page_is_file_cache(page)))
 			return PAGEREF_ACTIVATE;
 
 		return PAGEREF_KEEP;
