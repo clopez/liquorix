@@ -128,6 +128,11 @@ struct scan_control {
 int vm_swappiness;
 long vm_total_pages;	/* The total number of pages which the VM controls */
 
+/*
+ * Only start shrinking active file list when inactive is below this percentage.
+ */
+int inactive_file_ratio = 50;
+
 static LIST_HEAD(shrinker_list);
 static DECLARE_RWSEM(shrinker_rwsem);
 
@@ -1466,7 +1471,7 @@ static int inactive_file_is_low_global(struct zone *zone)
 	active = zone_page_state(zone, NR_ACTIVE_FILE);
 	inactive = zone_page_state(zone, NR_INACTIVE_FILE);
 
-	return (active > inactive);
+	return ((inactive * 100)/(inactive + active) < inactive_file_ratio);
 }
 
 /**
