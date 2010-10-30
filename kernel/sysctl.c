@@ -1346,13 +1346,11 @@ static struct ctl_table vm_table[] = {
 	},
 #endif
 	{
-		.ctl_name	= CTL_UNNUMBERED,
 		.procname	= "inactive_file_ratio",
 		.data		= &inactive_file_ratio,
 		.maxlen		= sizeof(inactive_file_ratio),
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec_minmax,
-		.strategy	= &sysctl_intvec,
 		.extra1		= &zero,
 		.extra2		= &one_hundred,
 	},
