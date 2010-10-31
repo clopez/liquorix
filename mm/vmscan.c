@@ -128,6 +128,11 @@ struct scan_control {
 int vm_swappiness;
 long vm_total_pages;	/* The total number of pages which the VM controls */
 
+/*
+ * Only start shrinking active file list when inactive is below this percentage.
+ */
+int inactive_file_ratio = 50;
+
 static LIST_HEAD(shrinker_list);
 static DECLARE_RWSEM(shrinker_rwsem);
 
@@ -615,8 +620,15 @@ static enum page_references page_check_references(struct page *page,
 		 * quickly recovered.
 		 */
 		SetPageReferenced(page);
-
-		if (referenced_page)
+		/*
+		 * Identify pte referenced and file-backed pages and give them
+		 * one trip around the active list. So that executable code get
+		 * better chances to stay in memory under moderate memory
+		 * pressure. JVM can create lots of anon VM_EXEC pages, so we
+		 * ignore them here.
+		 */
+		if (referenced_page || ((vm_flags & VM_EXEC) &&
+		    page_is_file_cache(page)))
 			return PAGEREF_ACTIVATE;
 
 		return PAGEREF_KEEP;
@@ -1510,7 +1522,7 @@ static int inactive_file_is_low_global(struct zone *zone)
 	active = zone_page_state(zone, NR_ACTIVE_FILE);
 	inactive = zone_page_state(zone, NR_INACTIVE_FILE);
 
-	return (active > inactive);
+	return ((inactive * 100)/(inactive + active) < inactive_file_ratio);
 }
 
 /**
