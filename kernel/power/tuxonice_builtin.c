@@ -384,6 +384,7 @@ static int __init toi_force_no_multithreaded_setup(char *str)
 
 __setup("toi_no_multithreaded", toi_force_no_multithreaded_setup);
 
+#ifdef CONFIG_KGDB
 static int __init toi_post_resume_breakpoint_setup(char *str)
 {
 	int value;
@@ -397,3 +398,4 @@ static int __init toi_post_resume_breakpoint_setup(char *str)
 }
 
 __setup("toi_post_resume_break", toi_post_resume_breakpoint_setup);
+#endif
