@@ -131,7 +131,7 @@ long vm_total_pages;	/* The total number of pages which the VM controls */
 /*
  * Only start shrinking active file list when inactive is below this percentage.
  */
-int inactive_file_ratio = 50;
+int inactive_file_ratio = 20;
 
 static LIST_HEAD(shrinker_list);
 static DECLARE_RWSEM(shrinker_rwsem);
