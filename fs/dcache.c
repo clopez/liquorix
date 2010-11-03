@@ -35,7 +35,11 @@
 #include <linux/hardirq.h>
 #include "internal.h"
 
+#if defined(CONFIG_ZEN_DESKTOP) 
+int sysctl_vfs_cache_pressure __read_mostly = 25;
+#else
 int sysctl_vfs_cache_pressure __read_mostly = 100;
+#endif
 EXPORT_SYMBOL_GPL(sysctl_vfs_cache_pressure);
 
  __cacheline_aligned_in_smp DEFINE_SPINLOCK(dcache_lock);
