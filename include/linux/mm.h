@@ -36,8 +36,6 @@ extern int sysctl_legacy_va_layout;
 #define sysctl_legacy_va_layout 0
 #endif
 
-extern int inactive_file_ratio;
-
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
