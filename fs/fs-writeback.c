@@ -84,12 +84,8 @@ static void bdi_wakeup_flusher(struct backing_dev_info *bdi)
 static void bdi_queue_work(struct backing_dev_info *bdi,
 			   struct wb_writeback_work *work)
 {
-	trace_writeback_queue(bdi, work);
-
 	spin_lock_bh(&bdi->wb_lock);
 	list_add_tail(&work->list, &bdi->work_list);
-	if (!bdi->wb.task)
-		trace_writeback_nothread(bdi, work);
 	bdi_wakeup_flusher(bdi);
 }
 
