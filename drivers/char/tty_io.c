@@ -580,6 +580,7 @@ void __tty_hangup(struct tty_struct *tty)
 			spin_lock_irq(&p->sighand->siglock);
 			if (p->signal->tty == tty) {
 				p->signal->tty = NULL;
+				sched_autogroup_detatch(p);
 				/* We defer the dereferences outside fo
 				   the tasklist lock */
 				refs++;
@@ -3070,6 +3071,7 @@ void proc_clear_tty(struct task_struct *p)
 	spin_lock_irqsave(&p->sighand->siglock, flags);
 	tty = p->signal->tty;
 	p->signal->tty = NULL;
+	sched_autogroup_detatch(p);
 	spin_unlock_irqrestore(&p->sighand->siglock, flags);
 	tty_kref_put(tty);
 }
@@ -3089,12 +3091,14 @@ static void __proc_set_tty(struct task_struct *tsk, struct tty_struct *tty)
 		tty->session = get_pid(task_session(tsk));
 		if (tsk->signal->tty) {
 			printk(KERN_DEBUG "tty not NULL!!\n");
+			sched_autogroup_detatch(tsk);
 			tty_kref_put(tsk->signal->tty);
 		}
 	}
 	put_pid(tsk->signal->tty_old_pgrp);
 	tsk->signal->tty = tty_kref_get(tty);
 	tsk->signal->tty_old_pgrp = NULL;
+	sched_autogroup_create_attach(tsk);
 }
 
 static void proc_set_tty(struct task_struct *tsk, struct tty_struct *tty)

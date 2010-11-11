@@ -174,6 +174,7 @@ repeat:
 	write_lock_irq(&tasklist_lock);
 	tracehook_finish_release_task(p);
 	__exit_signal(p);
+	sched_autogroup_exit(p);
 
 	/*
 	 * If we are the last non-leader member of the thread
