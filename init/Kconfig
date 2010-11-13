@@ -800,6 +800,7 @@ endif # CGROUPS
 
 config SCHED_AUTOGROUP
 	bool "Automatic process group scheduling"
+	depends on SCHED_CFS
 	select CGROUPS
 	select CGROUP_SCHED
 	select FAIR_GROUP_SCHED
