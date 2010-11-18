@@ -49,16 +49,6 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 		/* Start X as SCHED_ISO */
 		sched_setscheduler_nocheck(current, SCHED_ISO, &param);
 	}
-#elif defined(CONFIG_SCHED_CFS_BOOST)
-	if (turn_on) {
-		if (!capable(CAP_SYS_RAWIO))
-		return -EPERM;
-		/*
-		 * Task will be accessing hardware IO ports,
-		 * mark it as special with the scheduler too:
-		 */
-		sched_privileged_task(current);
-	}
 #else
 	if (turn_on && !capable(CAP_SYS_RAWIO))
 		return -EPERM;
@@ -138,10 +128,6 @@ long sys_iopl(unsigned int level, struct pt_regs *regs)
 			return -EPERM;
 		/* Start X as SCHED_ISO */
 		sched_setscheduler_nocheck(current, SCHED_ISO, &param);
-#elif defined(CONFIG_SCHED_CFS_BOOST)
-		if (!capable(CAP_SYS_RAWIO))
-			return -EPERM;
-			sched_privileged_task(current);
 #else
 		if (!capable(CAP_SYS_RAWIO))
 			return -EPERM;
