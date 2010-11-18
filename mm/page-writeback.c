@@ -668,7 +668,7 @@ pause:
 	if (pause == 0 && nr_dirty < background_thresh)
 		current->nr_dirtied_pause = ratelimit_pages(bdi);
 	else if (pause == 1)
-		current->nr_dirtied_pause += current->nr_dirtied_pause >> 5;
+		current->nr_dirtied_pause += current->nr_dirtied_pause / 32 + 1;
 	else if (pause >= HZ/10)
 		/*
 		 * when repeated, writing 1 page per 100ms on slow devices,
