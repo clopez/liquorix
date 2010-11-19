@@ -3,15 +3,19 @@
 unsigned int __read_mostly sysctl_sched_autogroup_enabled = 1;
 
 struct autogroup {
-	struct kref		kref;
 	struct task_group	*tg;
+	struct kref		kref;
+	unsigned long		id;
 };
 
 static struct autogroup autogroup_default;
+static atomic_t autogroup_seq_nr;
 
 static void autogroup_init(struct task_struct *init_task)
 {
 	autogroup_default.tg = &init_task_group;
+	autogroup_default.id = 0;
+	atomic_set(&autogroup_seq_nr, 1);
 	kref_init(&autogroup_default.kref);
 	init_task->signal->autogroup = &autogroup_default;
 }
@@ -44,10 +48,15 @@ static inline struct autogroup *autogroup_create(void)
 		goto out_fail;
 
 	ag->tg = sched_create_group(&init_task_group);
-	kref_init(&ag->kref);
 
-	if (!(IS_ERR(ag->tg)))
-		return ag;
+	if (IS_ERR(ag->tg))
+		goto out_fail;
+
+	kref_init(&ag->kref);
+	ag->tg->autogroup = ag;
+	ag->id = atomic_inc_return(&autogroup_seq_nr);
+
+	return ag;
 
 out_fail:
 	if (ag) {
@@ -91,23 +100,27 @@ autogroup_move_group(struct task_struct *p, struct autogroup *ag)
 	struct autogroup *prev;
 	struct task_struct *t;
 
+	spin_lock(&p->sighand->siglock);
+
 	prev = p->signal->autogroup;
-	if (prev == ag)
+	if (prev == ag) {
+		spin_unlock(&p->sighand->siglock);
 		return;
+	}
 
 	p->signal->autogroup = autogroup_kref_get(ag);
-	sched_move_task(p);
+	t = p;
 
-	rcu_read_lock();
-	list_for_each_entry_rcu(t, &p->thread_group, thread_group) {
-		sched_move_task(t);
-	}
-	rcu_read_unlock();
+	do {
+		sched_move_task(p);
+	} while_each_thread(p, t);
+
+	spin_unlock(&p->sighand->siglock);
 
 	autogroup_kref_put(prev);
 }
 
-/* Must be called with siglock held */
+/* Allocates GFP_KERNEL, cannot be called under any spinlock */
 void sched_autogroup_create_attach(struct task_struct *p)
 {
 	struct autogroup *ag = autogroup_create();
@@ -118,7 +131,7 @@ void sched_autogroup_create_attach(struct task_struct *p)
 }
 EXPORT_SYMBOL(sched_autogroup_create_attach);
 
-/* Must be called with siglock held.  Currently has no users */
+/* Cannot be called under siglock.  Currently has no users */
 void sched_autogroup_detach(struct task_struct *p)
 {
 	autogroup_move_group(p, &autogroup_default);
@@ -147,4 +160,11 @@ static int __init setup_autogroup(char *str)
 }
 
 __setup("noautogroup", setup_autogroup);
+
+#ifdef CONFIG_SCHED_DEBUG
+static inline int autogroup_path(struct task_group *tg, char *buf, int buflen)
+{
+	return snprintf(buf, buflen, "%s-%ld", "autogroup", tg->autogroup->id);
+}
 #endif
+#endif /* CONFIG_SCHED_AUTOGROUP */
