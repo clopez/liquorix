@@ -2615,8 +2615,7 @@ static inline void update_sd_lb_stats(struct sched_domain *sd, int this_cpu,
 		 * heaviest group when it is already under-utilized (possible
 		 * with a large weight task outweighs the tasks on the system).
 		 */
-		if (prefer_sibling && !local_group && sds->this_has_capacity &&
-		    sds->this_nr_running < sds->this_group_capacity)
+		if (prefer_sibling && !local_group && sds->this_has_capacity)
 			sgs.group_capacity = min(sgs.group_capacity, 1UL);
 
 		if (local_group) {
