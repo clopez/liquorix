@@ -1003,6 +1003,8 @@ static int ext4_show_options(struct seq_file *seq, struct vfsmount *vfs)
 		seq_puts(seq, ",journal_async_commit");
 	else if (test_opt(sb, JOURNAL_CHECKSUM))
 		seq_puts(seq, ",journal_checksum");
+	if (test_opt(sb, AKPM_LOCK_HACK))
+		seq_puts(seq, ",akpm_lock_hack");
 	if (test_opt(sb, I_VERSION))
 		seq_puts(seq, ",i_version");
 	if (!test_opt(sb, DELALLOC) &&
@@ -1219,6 +1221,7 @@ enum {
 	Opt_inode_readahead_blks, Opt_journal_ioprio,
 	Opt_dioread_nolock, Opt_dioread_lock,
 	Opt_discard, Opt_nodiscard,
+	Opt_akpm_lock_hack,
 };
 
 static const match_table_t tokens = {
@@ -1276,6 +1279,7 @@ static const match_table_t tokens = {
 	{Opt_i_version, "i_version"},
 	{Opt_stripe, "stripe=%u"},
 	{Opt_resize, "resize"},
+	{Opt_akpm_lock_hack, "akpm_lock_hack"},
 	{Opt_delalloc, "delalloc"},
 	{Opt_nodelalloc, "nodelalloc"},
 	{Opt_block_validity, "block_validity"},
@@ -1758,6 +1762,9 @@ set_qf_format:
 			break;
 		case Opt_dioread_lock:
 			clear_opt(sbi->s_mount_opt, DIOREAD_NOLOCK);
+			break;
+		case Opt_akpm_lock_hack:
+			set_opt(sbi->s_mount_opt, AKPM_LOCK_HACK);
 			break;
 		default:
 			ext4_msg(sb, KERN_ERR,
@@ -3241,6 +3248,10 @@ static void ext4_init_journal_params(struct super_block *sb, journal_t *journal)
 		journal->j_flags |= JBD2_ABORT_ON_SYNCDATA_ERR;
 	else
 		journal->j_flags &= ~JBD2_ABORT_ON_SYNCDATA_ERR;
+	if (test_opt(sb, AKPM_LOCK_HACK))
+		journal->j_flags |= JBD2_LOCK_HACK;
+	else
+		journal->j_flags &= ~JBD2_LOCK_HACK;
 	write_unlock(&journal->j_state_lock);
 }
 
