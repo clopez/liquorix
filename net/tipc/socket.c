@@ -522,6 +522,8 @@ static int send_msg(struct kiocb *iocb, struct socket *sock,
 	if (unlikely((m->msg_namelen < sizeof(*dest)) ||
 		     (dest->family != AF_TIPC)))
 		return -EINVAL;
+	if (total_len > TIPC_MAX_USER_MSG_SIZE)
+		return -EMSGSIZE;
 
 	if (iocb)
 		lock_sock(sk);
@@ -629,6 +631,9 @@ static int send_packet(struct kiocb *iocb, struct socket *sock,
 	if (unlikely(dest))
 		return send_msg(iocb, sock, m, total_len);
 
+	if (total_len > TIPC_MAX_USER_MSG_SIZE)
+		return -EMSGSIZE;
+
 	if (iocb)
 		lock_sock(sk);
 
@@ -710,6 +715,11 @@ static int send_stream(struct kiocb *iocb, struct socket *sock,
 
 	if (unlikely(m->msg_name)) {
 		res = -EISCONN;
+		goto exit;
+	}
+
+	if (total_len > (unsigned)INT_MAX) {
+		res = -EMSGSIZE;
 		goto exit;
 	}
 
