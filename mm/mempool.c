@@ -235,7 +235,7 @@ repeat_alloc:
 	/* Now start performing page reclaim */
 	gfp_temp = gfp_mask;
 	init_wait(&wait);
-	prepare_to_wait(&pool->wait, &wait, TASK_INTERRUPTIBLE);
+	prepare_to_wait(&pool->wait, &wait, TASK_UNINTERRUPTIBLE);
 	smp_mb();
 	if (!pool->curr_nr) {
 		/*
