@@ -861,7 +861,9 @@ struct sched_group {
 	 * single CPU.
 	 */
 	unsigned int cpu_power, cpu_power_orig;
+#ifdef CONFIG_SCHED_CFS
 	unsigned int group_weight;
+#else
 
 	/*
 	 * The CPUs this group covers.
