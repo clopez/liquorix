@@ -93,8 +93,8 @@ static void task_group_path(struct task_group *tg, char *buf, int buflen)
 {
 	/* may be NULL if the underlying cgroup isn't fully-created yet */
 	if (!tg->css.cgroup) {
-		buf[0] = '\0';
-		autogroup_path(tg, buf, buflen);
+		if (!autogroup_path(tg, buf, buflen))
+			buf[0] = '\0';
 		return;
 	}
 	cgroup_path(tg->css.cgroup, buf, buflen);

@@ -273,7 +273,7 @@ struct task_group {
 	struct list_head siblings;
 	struct list_head children;
 
-#if (defined(CONFIG_SCHED_AUTOGROUP) && defined(CONFIG_SCHED_DEBUG))
+#ifdef CONFIG_SCHED_AUTOGROUP
 	struct autogroup *autogroup;
 #endif
 };
@@ -1951,6 +1951,7 @@ static void deactivate_task(struct rq *rq, struct task_struct *p, int flags)
 #include "sched_fair.c"
 #include "sched_rt.c"
 #include "sched_autogroup.c"
+#include "sched_stoptask.c"
 #ifdef CONFIG_SCHED_DEBUG
 # include "sched_debug.c"
 #endif
