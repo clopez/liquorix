@@ -39,6 +39,8 @@ int page_cluster;
 
 static DEFINE_PER_CPU(struct pagevec[NR_LRU_LISTS], lru_add_pvecs);
 static DEFINE_PER_CPU(struct pagevec, lru_rotate_pvecs);
+static DEFINE_PER_CPU(struct pagevec, lru_deactivate_pvecs);
+
 
 /*
  * This path almost never happens for VM activity - pages are normally
@@ -266,6 +268,45 @@ void add_page_to_unevictable_list(struct page *page)
 	spin_unlock_irq(&zone->lru_lock);
 }
 
+static void __pagevec_lru_deactive(struct pagevec *pvec)
+{
+	int i, lru, file;
+
+	struct zone *zone = NULL;
+
+	for (i = 0; i < pagevec_count(pvec); i++) {
+		struct page *page = pvec->pages[i];
+		struct zone *pagezone = page_zone(page);
+
+		if (pagezone != zone) {
+			if (zone)
+				spin_unlock_irq(&zone->lru_lock);
+			zone = pagezone;
+			spin_lock_irq(&zone->lru_lock);
+		}
+
+		if (PageLRU(page)) {
+			if (PageActive(page)) {
+				file = page_is_file_cache(page);
+				lru = page_lru_base_type(page);
+				del_page_from_lru_list(zone, page,
+						lru + LRU_ACTIVE);
+				ClearPageActive(page);
+				ClearPageReferenced(page);
+				add_page_to_lru_list(zone, page, lru);
+				__count_vm_event(PGDEACTIVATE);
+
+				update_page_reclaim_stat(zone, page, file, 0);
+			}
+		}
+	}
+	if (zone)
+		spin_unlock_irq(&zone->lru_lock);
+
+	release_pages(pvec->pages, pvec->nr, pvec->cold);
+	pagevec_reinit(pvec);
+}
+
 /*
  * Drain pages out of the cpu's pagevecs.
  * Either "cpu" is the current CPU, and preemption has already been
@@ -292,7 +333,26 @@ static void drain_cpu_pagevecs(int cpu)
 		pagevec_move_tail(pvec);
 		local_irq_restore(flags);
 	}
+
+	pvec = &per_cpu(lru_deactivate_pvecs, cpu);
+	if (pagevec_count(pvec))
+		__pagevec_lru_deactive(pvec);
 }
+
+/*
+ * Forecfully demote a page to the tail of the inactive list.
+ */
+void lru_deactivate_page(struct page *page)
+{
+	if (likely(get_page_unless_zero(page))) {
+		struct pagevec *pvec = &get_cpu_var(lru_deactivate_pvecs);
+
+		if (!pagevec_add(pvec, page))
+			__pagevec_lru_deactive(pvec);
+		put_cpu_var(lru_deactivate_pvecs);
+	}
+}
+
 
 void lru_add_drain(void)
 {
