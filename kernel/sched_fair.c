@@ -2597,8 +2597,7 @@ static inline void update_sd_lb_stats(struct sched_domain *sd, int this_cpu,
 		 * and move all the excess tasks away. We lower capacity only
 		 * if the local group can handle the extra capacity.
 		 */
-		if (prefer_sibling && !local_group &&
-		    sds->this_nr_running < sds->this_group_capacity)
+		if (prefer_sibling && !local_group && sds->this_has_capacity)
 			sgs.group_capacity = min(sgs.group_capacity, 1UL);
 
 		if (local_group) {
