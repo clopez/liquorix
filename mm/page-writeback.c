@@ -1108,6 +1108,7 @@ EXPORT_SYMBOL(write_one_page);
  */
 int __set_page_dirty_no_writeback(struct page *page)
 {
+	ClearPageReclaim(page);
 	if (!PageDirty(page))
 		SetPageDirty(page);
 	return 0;
@@ -1144,6 +1145,7 @@ void account_page_dirtied(struct page *page, struct address_space *mapping)
  */
 int __set_page_dirty_nobuffers(struct page *page)
 {
+	ClearPageReclaim(page);
 	if (!TestSetPageDirty(page)) {
 		struct address_space *mapping = page_mapping(page);
 		struct address_space *mapping2;
@@ -1206,6 +1208,8 @@ int set_page_dirty(struct page *page)
 #endif
 		return (*spd)(page);
 	}
+
+	ClearPageReclaim(page);
 	if (!PageDirty(page)) {
 		if (!TestSetPageDirty(page))
 			return 1;
@@ -1228,6 +1232,7 @@ int set_page_dirty_lock(struct page *page)
 {
 	int ret;
 
+	ClearPageReclaim(page);
 	lock_page_nosync(page);
 	ret = set_page_dirty(page);
 	unlock_page(page);
@@ -1255,7 +1260,6 @@ int clear_page_dirty_for_io(struct page *page)
 
 	BUG_ON(!PageLocked(page));
 
-	ClearPageReclaim(page);
 	if (mapping && mapping_cap_account_dirty(mapping)) {
 		/*
 		 * Yes, Virginia, this is indeed insane.
