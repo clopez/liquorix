@@ -275,28 +275,50 @@ void add_page_to_unevictable_list(struct page *page)
  * into inative list's head. Because the VM expects the page would
  * be writeout by flusher. The flusher's writeout is much effective
  * than reclaimer's random writeout.
+ *
+ * If the page isn't page_mapped and dirty/writeback, the page
+ * could reclaim asap using PG_reclaim.
+ *
+ * 1. active, mapped page -> none
+ * 2. active, dirty/writeback page -> inactive, head, PG_reclaim
+ * 3. inactive, mapped page -> none
+ * 4. inactive, dirty/writeback page -> inactive, head, PG_reclaim
+ * 5. Others -> none
+ *
+ * In 4, why it moves inactive's head, the VM expects the page would
+ * be writeout by flusher. The flusher's writeout is much effective than
+ * reclaimer's random writeout.
  */
 static void __lru_deactivate(struct page *page, struct zone *zone)
 {
 	int lru, file;
-	unsigned long vm_flags;
+	int active = 0;
 
-	if (!PageLRU(page) || !PageActive(page))
+	if (!PageLRU(page))
 		return;
-
 	/* Some processes are using the page */
 	if (page_mapped(page))
 		return;
+	if (PageActive(page))
+		active = 1;
 
-	file = page_is_file_cache(page);
-	lru = page_lru_base_type(page);
-	del_page_from_lru_list(zone, page, lru + LRU_ACTIVE);
-	ClearPageActive(page);
-	ClearPageReferenced(page);
-	add_page_to_lru_list(zone, page, lru);
-	__count_vm_event(PGDEACTIVATE);
+	if (PageWriteback(page) || PageDirty(page)) {
+		/*
+		 * PG_reclaim could be raced with end_page_writeback
+		 * It can make readahead confusing.  But race window
+		 * is _really_ small and  it's non-critical problem.
+		 */
+		SetPageReclaim(page);
 
-	update_page_reclaim_stat(zone, page, file, 0);
+		file = page_is_file_cache(page);
+		lru = page_lru_base_type(page);
+		del_page_from_lru_list(zone, page, lru + active);
+		ClearPageActive(page);
+		ClearPageReferenced(page);
+		add_page_to_lru_list(zone, page, lru);
+		__count_vm_event(PGDEACTIVATE);
+		update_page_reclaim_stat(zone, page, file, 0);
+	}
 }
 
 /*
