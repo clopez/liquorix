@@ -50,7 +50,11 @@ static const struct squashfs_decompressor squashfs_unknown_comp_ops = {
 
 static const struct squashfs_decompressor *decompressor[] = {
 	&squashfs_zlib_comp_ops,
+#ifdef CONFIG_SQUASHFS_LZMA
+	&squashfs_lzma_comp_ops,
+#else
 	&squashfs_lzma_unsupported_comp_ops,
+#endif
 	&squashfs_lzo_unsupported_comp_ops,
 	&squashfs_unknown_comp_ops
 };
