@@ -36,7 +36,6 @@
 #include <linux/slab.h>
 #endif /* STATIC */
 
-#include <linux/decompress/unlzma_mm.h>
 #include <linux/decompress/mm.h>
 
 #define	MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -89,7 +88,7 @@ static int nofill(void *buffer, unsigned int len)
 }
 
 /* Called twice: once at startup and once in rc_normalize() */
-static void INIT rc_read(struct rc *rc, void(*error)(char *x))
+static void INIT rc_read(struct rc *rc)
 {
 	rc->buffer_size = rc->fill((char *)rc->buffer, LZMA_IOBUF_SIZE);
 	if (rc->buffer_size <= 0)
@@ -116,13 +115,13 @@ static inline void INIT rc_init(struct rc *rc,
 	rc->range = 0xFFFFFFFF;
 }
 
-static inline void INIT rc_init_code(struct rc *rc, void(*error)(char *x))
+static inline void INIT rc_init_code(struct rc *rc)
 {
 	int i;
 
 	for (i = 0; i < 5; i++) {
 		if (rc->ptr >= rc->buffer_end)
-			rc_read(rc, error);
+			rc_read(rc);
 		rc->code = (rc->code << 8) | *rc->ptr++;
 	}
 }
@@ -135,33 +134,32 @@ static inline void INIT rc_free(struct rc *rc)
 }
 
 /* Called twice, but one callsite is in inline'd rc_is_bit_0_helper() */
-static void INIT rc_do_normalize(struct rc *rc, void(*error)(char *x))
+static void INIT rc_do_normalize(struct rc *rc)
 {
 	if (rc->ptr >= rc->buffer_end)
-		rc_read(rc, error);
+		rc_read(rc);
 	rc->range <<= 8;
 	rc->code = (rc->code << 8) | *rc->ptr++;
 }
-static inline void INIT rc_normalize(struct rc *rc, void(*error)(char *x))
+static inline void INIT rc_normalize(struct rc *rc)
 {
 	if (rc->range < (1 << RC_TOP_BITS))
-		rc_do_normalize(rc, error);
+		rc_do_normalize(rc);
 }
 
 /* Called 9 times */
 /* Why rc_is_bit_0_helper exists?
  *Because we want to always expose (rc->code < rc->bound) to optimizer
  */
-static inline uint32_t INIT rc_is_bit_0_helper(struct rc *rc, uint16_t *p,
-						void (*error)(char *x))
+static inline uint32_t INIT rc_is_bit_0_helper(struct rc *rc, uint16_t *p)
 {
-	rc_normalize(rc, error);
+	rc_normalize(rc);
 	rc->bound = *p * (rc->range >> RC_MODEL_TOTAL_BITS);
 	return rc->bound;
 }
-static inline int INIT rc_is_bit_0(struct rc *rc, uint16_t *p, void(*error)(char *x))
+static inline int INIT rc_is_bit_0(struct rc *rc, uint16_t *p)
 {
-	uint32_t t = rc_is_bit_0_helper(rc, p, error);
+	uint32_t t = rc_is_bit_0_helper(rc, p);
 	return rc->code < t;
 }
 
@@ -179,9 +177,9 @@ static inline void rc_update_bit_1(struct rc *rc, uint16_t *p)
 }
 
 /* Called 4 times in unlzma loop */
-static int INIT rc_get_bit(struct rc *rc, uint16_t *p, int *symbol, void(*error)(char *x))
+static int INIT rc_get_bit(struct rc *rc, uint16_t *p, int *symbol)
 {
-	if (rc_is_bit_0(rc, p, error)) {
+	if (rc_is_bit_0(rc, p)) {
 		rc_update_bit_0(rc, p);
 		*symbol *= 2;
 		return 0;
@@ -193,9 +191,9 @@ static int INIT rc_get_bit(struct rc *rc, uint16_t *p, int *symbol, void(*error)
 }
 
 /* Called once */
-static inline int INIT rc_direct_bit(struct rc *rc , void(*error)(char *x))
+static inline int INIT rc_direct_bit(struct rc *rc)
 {
-	rc_normalize(rc, error);
+	rc_normalize(rc);
 	rc->range >>= 1;
 	if (rc->code >= rc->range) {
 		rc->code -= rc->range;
@@ -206,14 +204,13 @@ static inline int INIT rc_direct_bit(struct rc *rc , void(*error)(char *x))
 
 /* Called twice */
 static inline void INIT
-rc_bit_tree_decode(struct rc *rc, uint16_t *p, int num_levels, int *symbol,
-							void(*error)(char *x))
+rc_bit_tree_decode(struct rc *rc, uint16_t *p, int num_levels, int *symbol)
 {
 	int i = num_levels;
 
 	*symbol = 1;
 	while (i--)
-		rc_get_bit(rc, p + *symbol, symbol, error);
+		rc_get_bit(rc, p + *symbol, symbol);
 	*symbol -= 1 << num_levels;
 }
 
@@ -350,8 +347,7 @@ static inline void INIT copy_bytes(struct writer *wr,
 static inline void INIT process_bit0(struct writer *wr, struct rc *rc,
 				     struct cstate *cst, uint16_t *p,
 				     int pos_state, uint16_t *prob,
-				     int lc, uint32_t literal_pos_mask,
-				     void(*error)(char *x)) {
+				     int lc, uint32_t literal_pos_mask) {
 	int mi = 1;
 	rc_update_bit_0(rc, prob);
 	prob = (p + LZMA_LITERAL +
@@ -369,7 +365,7 @@ static inline void INIT process_bit0(struct writer *wr, struct rc *rc,
 			match_byte <<= 1;
 			bit = match_byte & 0x100;
 			prob_lit = prob + 0x100 + bit + mi;
-			if (rc_get_bit(rc, prob_lit, &mi, error)) {
+			if (rc_get_bit(rc, prob_lit, &mi)) {
 				if (!bit)
 					break;
 			} else {
@@ -380,7 +376,7 @@ static inline void INIT process_bit0(struct writer *wr, struct rc *rc,
 	}
 	while (mi < 0x100) {
 		uint16_t *prob_lit = prob + mi;
-		rc_get_bit(rc, prob_lit, &mi, error);
+		rc_get_bit(rc, prob_lit, &mi);
 	}
 	write_byte(wr, mi);
 	if (cst->state < 4)
@@ -393,8 +389,7 @@ static inline void INIT process_bit0(struct writer *wr, struct rc *rc,
 
 static inline void INIT process_bit1(struct writer *wr, struct rc *rc,
 					    struct cstate *cst, uint16_t *p,
-					    int pos_state, uint16_t *prob,
-					    void(*error)(char *x)) {
+					    int pos_state, uint16_t *prob) {
   int offset;
 	uint16_t *prob_len;
 	int num_bits;
@@ -402,7 +397,7 @@ static inline void INIT process_bit1(struct writer *wr, struct rc *rc,
 
 	rc_update_bit_1(rc, prob);
 	prob = p + LZMA_IS_REP + cst->state;
-	if (rc_is_bit_0(rc, prob, error)) {
+	if (rc_is_bit_0(rc, prob)) {
 		rc_update_bit_0(rc, prob);
 		cst->rep3 = cst->rep2;
 		cst->rep2 = cst->rep1;
@@ -412,13 +407,13 @@ static inline void INIT process_bit1(struct writer *wr, struct rc *rc,
 	} else {
 		rc_update_bit_1(rc, prob);
 		prob = p + LZMA_IS_REP_G0 + cst->state;
-		if (rc_is_bit_0(rc, prob, error)) {
+		if (rc_is_bit_0(rc, prob)) {
 			rc_update_bit_0(rc, prob);
 			prob = (p + LZMA_IS_REP_0_LONG
 				+ (cst->state <<
 				   LZMA_NUM_POS_BITS_MAX) +
 				pos_state);
-			if (rc_is_bit_0(rc, prob, error)) {
+			if (rc_is_bit_0(rc, prob)) {
 				rc_update_bit_0(rc, prob);
 
 				cst->state = cst->state < LZMA_NUM_LIT_STATES ?
@@ -433,13 +428,13 @@ static inline void INIT process_bit1(struct writer *wr, struct rc *rc,
 
 			rc_update_bit_1(rc, prob);
 			prob = p + LZMA_IS_REP_G1 + cst->state;
-			if (rc_is_bit_0(rc, prob, error)) {
+			if (rc_is_bit_0(rc, prob)) {
 				rc_update_bit_0(rc, prob);
 				distance = cst->rep1;
 			} else {
 				rc_update_bit_1(rc, prob);
 				prob = p + LZMA_IS_REP_G2 + cst->state;
-				if (rc_is_bit_0(rc, prob, error)) {
+				if (rc_is_bit_0(rc, prob)) {
 					rc_update_bit_0(rc, prob);
 					distance = cst->rep2;
 				} else {
@@ -457,7 +452,7 @@ static inline void INIT process_bit1(struct writer *wr, struct rc *rc,
 	}
 
 	prob_len = prob + LZMA_LEN_CHOICE;
-	if (rc_is_bit_0(rc, prob_len, error)) {
+	if (rc_is_bit_0(rc, prob_len)) {
 		rc_update_bit_0(rc, prob_len);
 		prob_len = (prob + LZMA_LEN_LOW
 			    + (pos_state <<
@@ -467,7 +462,7 @@ static inline void INIT process_bit1(struct writer *wr, struct rc *rc,
 	} else {
 		rc_update_bit_1(rc, prob_len);
 		prob_len = prob + LZMA_LEN_CHOICE_2;
-		if (rc_is_bit_0(rc, prob_len, error)) {
+		if (rc_is_bit_0(rc, prob_len)) {
 			rc_update_bit_0(rc, prob_len);
 			prob_len = (prob + LZMA_LEN_MID
 				    + (pos_state <<
@@ -483,7 +478,7 @@ static inline void INIT process_bit1(struct writer *wr, struct rc *rc,
 		}
 	}
 
-	rc_bit_tree_decode(rc, prob_len, num_bits, &len, error);
+	rc_bit_tree_decode(rc, prob_len, num_bits, &len);
 	len += offset;
 
 	if (cst->state < 4) {
@@ -498,7 +493,7 @@ static inline void INIT process_bit1(struct writer *wr, struct rc *rc,
 			 << LZMA_NUM_POS_SLOT_BITS);
 		rc_bit_tree_decode(rc, prob,
 				   LZMA_NUM_POS_SLOT_BITS,
-				   &pos_slot, error);
+				   &pos_slot);
 		if (pos_slot >= LZMA_START_POS_MODEL_INDEX) {
 			int i, mi;
 			num_bits = (pos_slot >> 1) - 1;
@@ -511,7 +506,7 @@ static inline void INIT process_bit1(struct writer *wr, struct rc *rc,
 				num_bits -= LZMA_NUM_ALIGN_BITS;
 				while (num_bits--)
 					cst->rep0 = (cst->rep0 << 1) |
-						rc_direct_bit(rc, error);
+						rc_direct_bit(rc);
 				prob = p + LZMA_ALIGN;
 				cst->rep0 <<= LZMA_NUM_ALIGN_BITS;
 				num_bits = LZMA_NUM_ALIGN_BITS;
@@ -519,7 +514,7 @@ static inline void INIT process_bit1(struct writer *wr, struct rc *rc,
 			i = 1;
 			mi = 1;
 			while (num_bits--) {
-				if (rc_get_bit(rc, prob + mi, &mi, error))
+				if (rc_get_bit(rc, prob + mi, &mi))
 					cst->rep0 |= i;
 				i <<= 1;
 			}
@@ -536,12 +531,12 @@ static inline void INIT process_bit1(struct writer *wr, struct rc *rc,
 
 
 
-STATIC int INIT unlzma(unsigned char *buf, int in_len,
+STATIC inline int INIT unlzma(unsigned char *buf, int in_len,
 			      int(*fill)(void*, unsigned int),
 			      int(*flush)(void*, unsigned int),
 			      unsigned char *output,
 			      int *posp,
-			      void(*error)(char *x)
+			      void(*error_fn)(char *x)
 	)
 {
 	struct lzma_header header;
@@ -556,6 +551,8 @@ STATIC int INIT unlzma(unsigned char *buf, int in_len,
 	struct cstate cst;
 	unsigned char *inbuf;
 	int ret = -1;
+
+	set_error_fn(error_fn);
 
 	if (buf)
 		inbuf = buf;
@@ -579,7 +576,7 @@ STATIC int INIT unlzma(unsigned char *buf, int in_len,
 
 	for (i = 0; i < sizeof(header); i++) {
 		if (rc.ptr >= rc.buffer_end)
-			rc_read(&rc, error);
+			rc_read(&rc);
 		((unsigned char *)&header)[i] = *rc.ptr++;
 	}
 
@@ -624,17 +621,17 @@ STATIC int INIT unlzma(unsigned char *buf, int in_len,
 	for (i = 0; i < num_probs; i++)
 		p[i] = (1 << RC_MODEL_TOTAL_BITS) >> 1;
 
-	rc_init_code(&rc, error);
+	rc_init_code(&rc);
 
 	while (get_pos(&wr) < header.dst_size) {
 		int pos_state =	get_pos(&wr) & pos_state_mask;
 		uint16_t *prob = p + LZMA_IS_MATCH +
 			(cst.state << LZMA_NUM_POS_BITS_MAX) + pos_state;
-		if (rc_is_bit_0(&rc, prob, error))
+		if (rc_is_bit_0(&rc, prob))
 			process_bit0(&wr, &rc, &cst, p, pos_state, prob,
-				     lc, literal_pos_mask, error);
+				     lc, literal_pos_mask);
 		else {
-			process_bit1(&wr, &rc, &cst, p, pos_state, prob, error);
+			process_bit1(&wr, &rc, &cst, p, pos_state, prob);
 			if (cst.rep0 == 0)
 				break;
 		}
@@ -655,9 +652,6 @@ exit_1:
 exit_0:
 	return ret;
 }
-#if defined(CONFIG_DECOMPRESS_LZMA_NEEDED) && !defined(PREBOOT)
-EXPORT_SYMBOL(unlzma);
-#endif
 
 #ifdef PREBOOT
 STATIC int INIT decompress(unsigned char *buf, int in_len,

@@ -52,7 +52,6 @@
 #include <linux/slab.h>
 #endif /* STATIC */
 
-#include <linux/decompress/bunzip2_mm.h>
 #include <linux/decompress/mm.h>
 
 #ifndef INT_MAX
