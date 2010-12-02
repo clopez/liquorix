@@ -6,15 +6,6 @@
 #include <linux/utsname.h>
 
 unsigned int __read_mostly sysctl_sched_autogroup_enabled = 1;
-
-struct autogroup {
-	struct kref		kref;
-	struct task_group	*tg;
-	struct rw_semaphore	lock;
-	unsigned long		id;
-	int			nice;
-};
-
 static struct autogroup autogroup_default;
 static atomic_t autogroup_seq_nr;
 
@@ -74,9 +65,10 @@ static inline struct autogroup *autogroup_create(void)
 out_free:
 	kfree(ag);
 out_fail:
-	if (printk_ratelimit())
+	if (printk_ratelimit()) {
 		printk(KERN_WARNING "autogroup_create: %s failure.\n",
 			ag ? "sched_create_group()" : "kmalloc()");
+	}
 
 	return autogroup_kref_get(&autogroup_default);
 }
@@ -118,10 +110,7 @@ autogroup_move_group(struct task_struct *p, struct autogroup *ag)
 	struct task_struct *t;
 	unsigned long flags;
 
-	if (!lock_task_sighand(p, &flags)) {
-		WARN_ON(1);
-		return;
-	}
+	BUG_ON(!lock_task_sighand(p, &flags));
 
 	prev = p->signal->autogroup;
 	if (prev == ag) {
@@ -130,8 +119,8 @@ autogroup_move_group(struct task_struct *p, struct autogroup *ag)
 	}
 
 	p->signal->autogroup = autogroup_kref_get(ag);
-	t = p;
 
+	t = p;
 	do {
 		sched_move_task(t);
 	} while_each_thread(p, t);
