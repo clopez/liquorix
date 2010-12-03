@@ -41,6 +41,7 @@ struct writeback_control {
 					   extra jobs and livelock */
 	long nr_to_write;		/* Write this many pages, and decrement
 					   this for each page written */
+	long per_file_limit;		/* Write this many pages for one file */
 	long pages_skipped;		/* Pages which were not written */
 
 	/*
@@ -149,6 +150,8 @@ typedef int (*writepage_t)(struct page *page, struct writeback_control *wbc,
 
 int generic_writepages(struct address_space *mapping,
 		       struct writeback_control *wbc);
+void tag_pages_for_writeback(struct address_space *mapping,
+			     pgoff_t start, pgoff_t end);
 int write_cache_pages(struct address_space *mapping,
 		      struct writeback_control *wbc, writepage_t writepage,
 		      void *data);
