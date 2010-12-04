@@ -466,10 +466,12 @@ static int cpufreq_interactive_up_task(void *data)
 		for_each_cpu(cpu, &tmp_mask) {
 			pcpu = &per_cpu(cpuinfo, cpu);
 
+#if DEBUG
 			if (nr_running() == 1) {
 				dbgpr("up %d: tgt=%d nothing else running\n", cpu,
 				      pcpu->target_freq);
 			}
+#endif
 
 			__cpufreq_driver_target(pcpu->policy,
 						pcpu->target_freq,
