@@ -21,7 +21,7 @@
 #include "tuxonice_pageflags.h"
 #include "power.h"
 
-#define TOI_CORE_VERSION "3.2-rc1"
+#define TOI_CORE_VERSION "3.2-rc2"
 #define	TOI_HEADER_VERSION 3
 #define MY_BOOT_KERNEL_DATA_VERSION 3
 
@@ -66,8 +66,11 @@ enum {
 	TOI_LATE_CPU_HOTPLUG,
 	TOI_GET_MAX_MEM_ALLOCD,
 	TOI_NO_FLUSHER_THREAD,
-	TOI_NO_PS2_IF_UNNEEDED
+	TOI_NO_PS2_IF_UNNEEDED,
+	TOI_POST_RESUME_BREAKPOINT,
 };
+
+extern unsigned long toi_bootflags_mask;
 
 #define clear_action_state(bit) (test_and_clear_bit(bit, &toi_bkd.toi_action))
 
@@ -135,6 +138,7 @@ enum {
 	TOI_MEMORY,
 	TOI_PAGEDIR,
 	TOI_COMPRESS,
+	TOI_BIO,
 };
 
 #define set_debug_state(bit) (test_and_set_bit(bit, &toi_bkd.toi_debug_state))

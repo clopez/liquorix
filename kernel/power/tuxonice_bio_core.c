@@ -187,7 +187,7 @@ retry:
 				"initrd/ramfs?", device, bdev);
 		return ERR_PTR(-EINVAL);
 	}
-	toi_message(TOI_IO, TOI_VERBOSE, 0,
+	toi_message(TOI_BIO, TOI_VERBOSE, 0,
 			"TuxOnIce got bdev %p for dev_t %x.",
 			bdev, device);
 
@@ -647,7 +647,7 @@ static int toi_rw_cleanup(int writing)
 {
 	int i, result = 0;
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "toi_rw_cleanup.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "toi_rw_cleanup.");
 	if (writing) {
 		if (toi_writer_buffer_posn && !test_result_state(TOI_ABORTED))
 			toi_bio_queue_write(&toi_writer_buffer);
@@ -729,7 +729,7 @@ static int toi_start_one_readahead(int dedicated_thread)
 	mutex_unlock(&toi_bio_readahead_mutex);
 	if (result) {
 		if (result == -ENOSPC)
-			toi_message(TOI_IO, TOI_VERBOSE, 0,
+			toi_message(TOI_BIO, TOI_VERBOSE, 0,
 					"Last readahead page submitted.");
 		else
 			printk(KERN_DEBUG "toi_bio_rw_page returned %d.\n",
@@ -1155,19 +1155,19 @@ static int _toi_rw_header_chunk(int writing, struct toi_module_ops *owner,
 
 	if (!writing && !no_readahead && more_readahead) {
 		result = toi_start_new_readahead(0);
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "Start new readahead "
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, "Start new readahead "
 				"returned %d.", result);
 	}
 
 	if (!result) {
 		result = toi_rw_buffer(writing, buffer, buffer_size,
 				no_readahead);
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "rw_buffer returned "
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, "rw_buffer returned "
 				"%d.", result);
 	}
 
 	total_header_bytes += buffer_size;
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "_toi_rw_header_chunk returning "
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "_toi_rw_header_chunk returning "
 			"%d.", result);
 	return result;
 }
@@ -1310,12 +1310,12 @@ static unsigned long toi_bio_storage_available(void)
 		if (!this_module->enabled ||
 		    this_module->type != BIO_ALLOCATOR_MODULE)
 			continue;
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "Seeking storage "
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, "Seeking storage "
 				"available from %s.", this_module->name);
 		sum += this_module->bio_allocator_ops->storage_available();
 	}
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Total storage available is %lu "
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Total storage available is %lu "
 			"pages (%d header pages).", sum, header_pages_reserved);
 
 	return sum > header_pages_reserved ?
@@ -1335,7 +1335,7 @@ static unsigned long toi_bio_storage_allocated(void)
  */
 static void toi_bio_noresume_reset(void)
 {
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "toi_bio_noresume_reset.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "toi_bio_noresume_reset.");
 	toi_rw_cleanup(READ);
 	free_all_bdev_info();
 }
@@ -1369,7 +1369,7 @@ static int toi_bio_write_header_init(void)
 {
 	int result;
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "toi_bio_write_header_init");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "toi_bio_write_header_init");
 	toi_rw_init(WRITE, 0);
 	toi_writer_buffer_posn = 0;
 
@@ -1382,7 +1382,7 @@ static int toi_bio_write_header_init(void)
 	 * next header page by the time we go to use it.
 	 */
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "serialise extent chains.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "serialise extent chains.");
 	result = toi_serialise_extent_chains();
 
 	if (result)
@@ -1392,7 +1392,7 @@ static int toi_bio_write_header_init(void)
 	 * Signature page hasn't been modified at this point. Write it in
 	 * the header so we can restore it later.
 	 */
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "serialise signature page.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "serialise signature page.");
 	return toi_rw_header_chunk_noreadahead(WRITE, &toi_blockwriter_ops,
 			(char *) toi_cur_sig_page,
 			PAGE_SIZE);
@@ -1441,7 +1441,7 @@ static int toi_bio_read_header_init(void)
 
 	toi_writer_buffer_posn = 0;
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "toi_bio_read_header_init");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "toi_bio_read_header_init");
 
 	if (!toi_sig_data) {
 		printk(KERN_INFO "toi_bio_read_header_init called when we "
@@ -1453,7 +1453,7 @@ static int toi_bio_read_header_init(void)
 	 * If the header is not on the resume_swap_dev_t, get the resume device
 	 * first.
 	 */
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Header dev_t is %lx.",
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Header dev_t is %lx.",
 			toi_sig_data->header_dev_t);
 	if (toi_sig_data->have_uuid) {
 		struct fs_info seek;
@@ -1493,10 +1493,10 @@ static int toi_bio_read_header_init(void)
 	if (result)
 		return result;
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "load extent chains.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "load extent chains.");
 	result = toi_load_extent_chains();
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "load original signature page.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "load original signature page.");
 	toi_orig_sig_page = (char *) toi_get_zeroed_page(38, TOI_ATOMIC_GFP);
 	if (!toi_orig_sig_page) {
 		printk(KERN_ERR "Failed to allocate memory for the current"
@@ -1511,7 +1511,7 @@ static int toi_bio_read_header_init(void)
 
 static int toi_bio_read_header_cleanup(void)
 {
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "toi_bio_read_header_cleanup.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "toi_bio_read_header_cleanup.");
 	return toi_rw_cleanup(READ);
 }
 
@@ -1742,7 +1742,7 @@ static int toi_bio_remove_image(void)
 {
 	int result;
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "toi_bio_remove_image.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "toi_bio_remove_image.");
 
 	result = toi_bio_restore_original_signature();
 
