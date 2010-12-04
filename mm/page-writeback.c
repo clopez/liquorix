@@ -1120,7 +1120,6 @@ EXPORT_SYMBOL(write_one_page);
  */
 int __set_page_dirty_no_writeback(struct page *page)
 {
-	ClearPageReclaim(page);
 	if (!PageDirty(page))
 		SetPageDirty(page);
 	return 0;
@@ -1157,7 +1156,6 @@ void account_page_dirtied(struct page *page, struct address_space *mapping)
  */
 int __set_page_dirty_nobuffers(struct page *page)
 {
-	ClearPageReclaim(page);
 	if (!TestSetPageDirty(page)) {
 		struct address_space *mapping = page_mapping(page);
 		struct address_space *mapping2;
@@ -1238,6 +1236,17 @@ int set_page_dirty(struct page *page)
 {
 	struct address_space *mapping = page_mapping(page);
 
+	/*
+	 * readahead/lru_deactivate_page could remain
+	 * PG_readahead/PG_reclaim due to race with end_page_writeback
+	 * About readahead, if the page is written, the flags would be
+	 * reset. So no problem.
+	 * About lru_deactivate_page, if the page is redirty, the flag
+	 * will be reset. So no problem. but if the page is used by readahead
+	 * it will confuse readahead and  make it restart the size rampup
+	 * process. But it's a trivial problem.
+	 */
+	ClearPageReclaim(page);
 	if (likely(mapping)) {
 		int (*spd)(struct page *) = mapping->a_ops->set_page_dirty;
 #ifdef CONFIG_BLOCK
@@ -1246,8 +1255,6 @@ int set_page_dirty(struct page *page)
 #endif
 		return (*spd)(page);
 	}
-
-	ClearPageReclaim(page);
 	if (!PageDirty(page)) {
 		if (!TestSetPageDirty(page))
 			return 1;
@@ -1270,7 +1277,6 @@ int set_page_dirty_lock(struct page *page)
 {
 	int ret;
 
-	ClearPageReclaim(page);
 	lock_page_nosync(page);
 	ret = set_page_dirty(page);
 	unlock_page(page);

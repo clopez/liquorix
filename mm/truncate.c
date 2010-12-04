@@ -355,8 +355,8 @@ unsigned long invalidate_mapping_pages(struct address_space *mapping,
 			ret = invalidate_inode_page(page);
 			/*
 			 * If the page was dirty or under writeback we cannot
-			 * invalidate it now.  Move it to the tail of the
-			 * inactive LRU so that reclaim will free it promptly.
+			 * invalidate it now.  Move it to the head of the
+			 * inactive LRU for using deferred writeback of flusher.
 			 */
 			if (!ret)
 				lru_deactivate_page(page);

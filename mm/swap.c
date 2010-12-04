@@ -31,6 +31,7 @@
 #include <linux/backing-dev.h>
 #include <linux/memcontrol.h>
 #include <linux/gfp.h>
+#include <linux/rmap.h>
 
 #include "internal.h"
 
@@ -281,10 +282,64 @@ void add_page_to_unevictable_list(struct page *page)
 	spin_unlock_irq(&zone->lru_lock);
 }
 
-static void __pagevec_lru_deactive(struct pagevec *pvec)
+/*
+ * This function is used by invalidate_mapping_pages.
+ * If the page can't be invalidated, this function moves the page
+ * into inative list's head. Because the VM expects the page would
+ * be writeout by flusher. The flusher's writeout is much effective
+ * than reclaimer's random writeout.
+ *
+ * If the page isn't page_mapped and dirty/writeback, the page
+ * could reclaim asap using PG_reclaim.
+ *
+ * 1. active, mapped page -> none
+ * 2. active, dirty/writeback page -> inactive, head, PG_reclaim
+ * 3. inactive, mapped page -> none
+ * 4. inactive, dirty/writeback page -> inactive, head, PG_reclaim
+ * 5. Others -> none
+ *
+ * In 4, why it moves inactive's head, the VM expects the page would
+ * be writeout by flusher. The flusher's writeout is much effective than
+ * reclaimer's random writeout.
+ */
+static void __lru_deactivate(struct page *page, struct zone *zone)
 {
-	int i, lru, file;
+	int lru, file;
+	int active = 0;
 
+	if (!PageLRU(page))
+		return;
+	/* Some processes are using the page */
+	if (page_mapped(page))
+		return;
+	if (PageActive(page))
+		active = 1;
+
+	if (PageWriteback(page) || PageDirty(page)) {
+		/*
+		 * PG_reclaim could be raced with end_page_writeback
+		 * It can make readahead confusing.  But race window
+		 * is _really_ small and  it's non-critical problem.
+		 */
+		SetPageReclaim(page);
+
+		file = page_is_file_cache(page);
+		lru = page_lru_base_type(page);
+		del_page_from_lru_list(zone, page, lru + active);
+		ClearPageActive(page);
+		ClearPageReferenced(page);
+		add_page_to_lru_list(zone, page, lru);
+		__count_vm_event(PGDEACTIVATE);
+		update_page_reclaim_stat(zone, page, file, 0);
+	}
+}
+
+/*
+ * This function must be called with preemption disable.
+ */
+static void __pagevec_lru_deactivate(struct pagevec *pvec)
+{
+	int i;
 	struct zone *zone = NULL;
 
 	for (i = 0; i < pagevec_count(pvec); i++) {
@@ -297,21 +352,7 @@ static void __pagevec_lru_deactive(struct pagevec *pvec)
 			zone = pagezone;
 			spin_lock_irq(&zone->lru_lock);
 		}
-
-		if (PageLRU(page)) {
-			if (PageActive(page)) {
-				file = page_is_file_cache(page);
-				lru = page_lru_base_type(page);
-				del_page_from_lru_list(zone, page,
-						lru + LRU_ACTIVE);
-				ClearPageActive(page);
-				ClearPageReferenced(page);
-				add_page_to_lru_list(zone, page, lru);
-				__count_vm_event(PGDEACTIVATE);
-
-				update_page_reclaim_stat(zone, page, file, 0);
-			}
-		}
+		__lru_deactivate(page, zone);
 	}
 	if (zone)
 		spin_unlock_irq(&zone->lru_lock);
@@ -349,11 +390,13 @@ static void drain_cpu_pagevecs(int cpu)
 
 	pvec = &per_cpu(lru_deactivate_pvecs, cpu);
 	if (pagevec_count(pvec))
-		__pagevec_lru_deactive(pvec);
+		__pagevec_lru_deactivate(pvec);
 }
 
 /*
- * Forecfully demote a page to the tail of the inactive list.
+ * Forcefully deactivate a page.
+ * This function is used for reclaiming the page ASAP when the page
+ * can't be invalidated by Dirty/Writeback.
  */
 void lru_deactivate_page(struct page *page)
 {
@@ -361,11 +404,10 @@ void lru_deactivate_page(struct page *page)
 		struct pagevec *pvec = &get_cpu_var(lru_deactivate_pvecs);
 
 		if (!pagevec_add(pvec, page))
-			__pagevec_lru_deactive(pvec);
+			__pagevec_lru_deactivate(pvec);
 		put_cpu_var(lru_deactivate_pvecs);
 	}
 }
-
 
 void lru_add_drain(void)
 {
