@@ -704,7 +704,6 @@ int __set_page_dirty_buffers(struct page *page)
 	int newly_dirty;
 	struct address_space *mapping = page_mapping(page);
 
-	ClearPageReclaim(page);
 	if (unlikely(!mapping))
 		return !TestSetPageDirty(page);
 
