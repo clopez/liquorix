@@ -765,7 +765,8 @@ struct zap_details {
 #define __ZAP_DETAILS_INITIALIZER(name) \
 		{ .nonlinear_vma = NULL \
 		, .check_mapping = NULL \
-		, .i_mmap_lock = NULL }
+		, .i_mmap_lock = NULL	\
+		, .ignore_references = false }
 
 #define DEFINE_ZAP_DETAILS(name)		\
 	struct zap_details name = __ZAP_DETAILS_INITIALIZER(name)

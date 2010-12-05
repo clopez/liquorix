@@ -897,6 +897,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	pte_t *pte;
 	spinlock_t *ptl;
 	int rss[NR_MM_COUNTERS];
+	bool ignore_references = details->ignore_references;
 
 	init_rss_vec(rss);
 
@@ -952,7 +953,8 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 				if (pte_dirty(ptent))
 					set_page_dirty(page);
 				if (pte_young(ptent) &&
-				    likely(!VM_SequentialReadHint(vma)))
+				    likely(!VM_SequentialReadHint(vma)) &&
+					!ignore_references)
 					mark_page_accessed(page);
 				rss[MM_FILEPAGES]--;
 			}
@@ -1218,6 +1220,7 @@ int zap_vma_ptes(struct vm_area_struct *vma, unsigned long address,
 		unsigned long size)
 {
 	DEFINE_ZAP_DETAILS(details);
+	details.ignore_references = true;
 	if (address < vma->vm_start || address + size > vma->vm_end ||
 	    		!(vma->vm_flags & VM_PFNMAP))
 		return -1;
