@@ -163,6 +163,7 @@ static long madvise_dontneed(struct vm_area_struct * vma,
 			     unsigned long start, unsigned long end)
 {
 	DEFINE_ZAP_DETAILS(details);
+	details.ignore_references = true;
 
 	*prev = vma;
 	if (vma->vm_flags & (VM_LOCKED|VM_HUGETLB|VM_PFNMAP))
@@ -173,10 +174,9 @@ static long madvise_dontneed(struct vm_area_struct * vma,
 		details.last_index = ULONG_MAX;
 
 		zap_page_range(vma, start, end - start, &details);
-	} else {
-
+	} else
 		zap_page_range(vma, start, end - start, &details);
-	}
+
 	return 0;
 }
 
