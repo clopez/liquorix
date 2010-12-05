@@ -317,6 +317,7 @@ static void lru_deactivate(struct page *page, struct zone *zone)
 		 * is _really_ small and  it's non-critical problem.
 		 */
 		SetPageReclaim(page);
+		__count_vm_event(PGRECLAIM);
 	} else {
 		/*
 		 * The page's writeback ends up during pagevec
@@ -328,6 +329,8 @@ static void lru_deactivate(struct page *page, struct zone *zone)
 
 	if (active)
 		__count_vm_event(PGDEACTIVATE);
+
+	__count_vm_event(PGINVALIDATE);
 	update_page_reclaim_stat(zone, page, file, 0);
 }
 
