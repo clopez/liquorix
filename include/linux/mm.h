@@ -758,6 +758,14 @@ struct zap_details {
 	unsigned long truncate_count;		/* Compare vm_truncate_count */
 };
 
+#define __ZAP_DETAILS_INITIALIZER(name) \
+		{ .nonlinear_vma = NULL \
+		, .check_mapping = NULL \
+		, .i_mmap_lock = NULL }
+
+#define DEFINE_ZAP_DETAILS(name)		\
+	struct zap_details name = __ZAP_DETAILS_INITIALIZER(name)
+
 struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 		pte_t pte);
 
