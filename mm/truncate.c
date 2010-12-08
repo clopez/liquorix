@@ -324,8 +324,7 @@ unsigned long invalidate_mapping_pages(struct address_space *mapping,
 {
 	struct pagevec pvec;
 	pgoff_t next = start;
-	unsigned long ret;
-	unsigned long count = 0;
+	unsigned long ret = 0;
 	int i;
 
 	pagevec_init(&pvec, 0);
@@ -352,15 +351,8 @@ unsigned long invalidate_mapping_pages(struct address_space *mapping,
 			if (lock_failed)
 				continue;
 
-			ret = invalidate_inode_page(page);
-			/*
-			 * If the page was dirty or under writeback we cannot
-			 * invalidate it now.  Move it to the head of the
-			 * inactive LRU for using deferred writeback of flusher.
-			 */
-			if (!ret)
-				lru_deactivate_page(page);
-			count += ret;
+			ret += invalidate_inode_page(page);
+
 			unlock_page(page);
 			if (next > end)
 				break;
@@ -369,7 +361,7 @@ unsigned long invalidate_mapping_pages(struct address_space *mapping,
 		mem_cgroup_uncharge_end();
 		cond_resched();
 	}
-	return count;
+	return ret;
 }
 EXPORT_SYMBOL(invalidate_mapping_pages);
 
