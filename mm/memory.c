@@ -899,12 +899,8 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	pte_t *pte;
 	spinlock_t *ptl;
 	int rss[NR_MM_COUNTERS];
-	bool ignore_references = details->ignore_references;
 
 	init_rss_vec(rss);
-
-	if (!details->check_mapping && !details->nonlinear_vma)
-		details = NULL;
 
 	pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 	arch_enter_lazy_mmu_mode();
@@ -955,8 +951,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 				if (pte_dirty(ptent))
 					set_page_dirty(page);
 				if (pte_young(ptent) &&
-				    likely(!VM_SequentialReadHint(vma)) &&
-					!ignore_references)
+				    likely(!VM_SequentialReadHint(vma)))
 					mark_page_accessed(page);
 				rss[MM_FILEPAGES]--;
 			}
@@ -1045,6 +1040,9 @@ static unsigned long unmap_page_range(struct mmu_gather *tlb,
 	pgd_t *pgd;
 	unsigned long next;
 
+	if (details && !details->check_mapping && !details->nonlinear_vma)
+		details = NULL;
+
 	BUG_ON(addr >= end);
 	mem_cgroup_uncharge_start();
 	tlb_start_vma(tlb, vma);
@@ -1106,7 +1104,7 @@ unsigned long unmap_vmas(struct mmu_gather **tlbp,
 	unsigned long tlb_start = 0;	/* For tlb_finish_mmu */
 	int tlb_start_valid = 0;
 	unsigned long start = start_addr;
-	spinlock_t *i_mmap_lock = details->i_mmap_lock;
+	spinlock_t *i_mmap_lock = details? details->i_mmap_lock: NULL;
 	int fullmm = (*tlbp)->fullmm;
 	struct mm_struct *mm = vma->vm_mm;
 
@@ -1221,12 +1219,10 @@ unsigned long zap_page_range(struct vm_area_struct *vma, unsigned long address,
 int zap_vma_ptes(struct vm_area_struct *vma, unsigned long address,
 		unsigned long size)
 {
-	DEFINE_ZAP_DETAILS(details);
-	details.ignore_references = true;
 	if (address < vma->vm_start || address + size > vma->vm_end ||
 	    		!(vma->vm_flags & VM_PFNMAP))
 		return -1;
-	zap_page_range(vma, address, size, &details);
+	zap_page_range(vma, address, size, NULL);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(zap_vma_ptes);
@@ -2557,8 +2553,7 @@ restart:
 void unmap_mapping_range(struct address_space *mapping,
 		loff_t const holebegin, loff_t const holelen, int even_cows)
 {
-	DEFINE_ZAP_DETAILS(details);
-
+	struct zap_details details;
 	pgoff_t hba = holebegin >> PAGE_SHIFT;
 	pgoff_t hlen = (holelen + PAGE_SIZE - 1) >> PAGE_SHIFT;
 
