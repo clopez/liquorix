@@ -354,12 +354,13 @@ unsigned long invalidate_mapping_pages(struct address_space *mapping,
 
 			ret = invalidate_inode_page(page);
 			/*
-			 * If the page was dirty or under writeback we cannot
-			 * invalidate it now.  Move it to the head of the
-			 * inactive LRU for using deferred writeback of flusher.
+			 * If the page is dirty or under writeback, we can not
+			 * invalidate it now.  But we assume that attempted
+			 * invalidation is a hint that the page is no longer
+			 * of interest and try to speed up its reclaim.
 			 */
-			if (!ret)
-				lru_deactivate_page(page);
+			if (!ret && (PageDirty(page) || PageWriteback(page)))
+				deactivate_page(page);
 			count += ret;
 			unlock_page(page);
 			if (next > end)

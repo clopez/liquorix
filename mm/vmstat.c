@@ -832,6 +832,9 @@ static const char * const vmstat_text[] = {
 	"pgactivate",
 	"pgdeactivate",
 
+	"pginvalidate",
+	"pgreclaim",
+
 	"pgfault",
 	"pgmajfault",
 
