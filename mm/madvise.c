@@ -162,21 +162,18 @@ static long madvise_dontneed(struct vm_area_struct * vma,
 			     struct vm_area_struct ** prev,
 			     unsigned long start, unsigned long end)
 {
-	DEFINE_ZAP_DETAILS(details);
-	details.ignore_references = true;
-
 	*prev = vma;
 	if (vma->vm_flags & (VM_LOCKED|VM_HUGETLB|VM_PFNMAP))
 		return -EINVAL;
 
 	if (unlikely(vma->vm_flags & VM_NONLINEAR)) {
-		details.nonlinear_vma = vma;
-		details.last_index = ULONG_MAX;
-
+		struct zap_details details = {
+			.nonlinear_vma = vma,
+			.last_index = ULONG_MAX,
+		};
 		zap_page_range(vma, start, end - start, &details);
 	} else
-		zap_page_range(vma, start, end - start, &details);
-
+		zap_page_range(vma, start, end - start, NULL);
 	return 0;
 }
 
