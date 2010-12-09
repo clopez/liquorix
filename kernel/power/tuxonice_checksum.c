@@ -24,6 +24,7 @@
 #include "tuxonice_checksum.h"
 #include "tuxonice_pagedir.h"
 #include "tuxonice_alloc.h"
+#include "tuxonice_ui.h"
 
 static struct toi_module_ops toi_checksum_ops;
 
@@ -290,14 +291,17 @@ void check_checksums(void)
 	char current_checksum[CHECKSUM_SIZE];
 	struct cpu_context *ctx = &per_cpu(contexts, cpu);
 
-	if (!toi_checksum_ops.enabled)
+	if (!toi_checksum_ops.enabled) {
+		toi_message(TOI_IO, TOI_VERBOSE, 0, "Checksumming disabled.");
 		return;
+	}
 
 	next_page = (unsigned long) page_list;
 
 	toi_num_resaved = 0;
 	this_checksum = 0;
 
+	toi_message(TOI_IO, TOI_VERBOSE, 0, "Verifying checksums.");
 	memory_bm_position_reset(pageset2_map);
 	for (pfn = memory_bm_next_pfn(pageset2_map); pfn != BM_END_OF_MAP;
 			pfn = memory_bm_next_pfn(pageset2_map)) {
@@ -326,6 +330,8 @@ void check_checksums(void)
 
 		if (memcmp(current_checksum, (char *) this_checksum,
 							CHECKSUM_SIZE)) {
+			toi_message(TOI_IO, TOI_VERBOSE, 0, "Resaving %ld.",
+					pfn);
 			SetPageResave(pfn_to_page(pfn));
 			toi_num_resaved++;
 			if (test_action_state(TOI_ABORT_ON_RESAVE_NEEDED))
@@ -334,6 +340,7 @@ void check_checksums(void)
 
 		index++;
 	}
+	toi_message(TOI_IO, TOI_VERBOSE, 0, "Checksum verification complete.");
 }
 
 static struct toi_sysfs_data sysfs_params[] = {

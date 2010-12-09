@@ -437,6 +437,8 @@ static int write_next_page(unsigned long *data_pfn, int *my_io_index,
 		*my_checksum_locn = tuxonice_get_next_checksum();
 	}
 
+	toi_message(TOI_IO, TOI_VERBOSE, 0, "Write %d:%ld.", *my_io_index, *write_pfn);
+
 	mutex_unlock(&io_mutex);
 
 	if (io_pageset == 2 && tuxonice_calc_checksum(page, *my_checksum_locn))
@@ -470,8 +472,11 @@ static int read_next_page(int *my_io_index, unsigned long *write_pfn,
 	unsigned int buf_size = PAGE_SIZE;
 	unsigned long left = atomic_read(&io_count);
 
-	if (left)
-		*my_io_index = io_finish_at - atomic_read(&io_count);
+	if (!left)
+		return -ENODATA;
+
+	/* Start off assuming the page we read isn't resaved */
+	*my_io_index = io_finish_at - atomic_sub_return(1, &io_count);
 
 	mutex_unlock(&io_mutex);
 
@@ -494,9 +499,6 @@ static int read_next_page(int *my_io_index, unsigned long *write_pfn,
 			schedule();
 	}
 
-	if (!left)
-		return -ENODATA;
-
 	/*
 	 * See toi_bio_read_page in tuxonice_bio.c:
 	 * read the next page in the image.
@@ -510,8 +512,8 @@ static void use_read_page(unsigned long write_pfn, struct page *buffer)
 		    *copy_page = final_page;
 	char *virt, *buffer_virt;
 	int was_present, cpu = smp_processor_id();
+	unsigned long idx;
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Seeking to use pfn %ld.", write_pfn);
 	if (io_pageset == 1 && (!pageset1_copy_map ||
 			!memory_bm_test_bit_index(pageset1_copy_map, write_pfn, cpu))) {
 		copy_page = copy_page_from_orig_page(final_page);
@@ -519,7 +521,10 @@ static void use_read_page(unsigned long write_pfn, struct page *buffer)
 	}
 
 	if (!memory_bm_test_bit_index(io_map, write_pfn, cpu)) {
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "Ignoring read of pfn %ld.", write_pfn);
+		toi_message(TOI_IO, TOI_VERBOSE, 0, "Discard %ld.", write_pfn);
+		mutex_lock(&io_mutex);
+		idx = atomic_add_return(1, &io_count);
+		mutex_unlock(&io_mutex);
 		return;
 	}
 
@@ -534,7 +539,7 @@ static void use_read_page(unsigned long write_pfn, struct page *buffer)
 	kunmap(copy_page);
 	kunmap(buffer);
 	memory_bm_clear_bit_index(io_map, write_pfn, cpu);
-	atomic_dec(&io_count);
+	toi_message(TOI_IO, TOI_VERBOSE, 0, "Read %d:%ld", idx, write_pfn);
 }
 
 static unsigned long status_update(int writing, unsigned long done,
@@ -607,7 +612,7 @@ static int worker_rw_loop(void *data)
 			if (result == -ENODATA) {
 				toi_message(TOI_IO, TOI_VERBOSE, 0,
 					"Thread %d has no more work.",
-					(int) data);
+					smp_processor_id());
 				break;
 			}
 
@@ -634,17 +639,29 @@ static int worker_rw_loop(void *data)
 		 * Discard reads of resaved pages while reading ps2
 		 * and unwanted pages while rereading ps2 when aborting.
 		 */
-		if (!io_write && !PageResave(pfn_to_page(write_pfn)))
-			use_read_page(write_pfn, buffer);
+		if (!io_write) {
+			if (!PageResave(pfn_to_page(write_pfn)))
+				use_read_page(write_pfn, buffer);
+			else {
+				mutex_lock(&io_mutex);
+				toi_message(TOI_IO, TOI_VERBOSE, 0,
+						"Resaved %ld.", write_pfn);
+				atomic_inc(&io_count);
+				mutex_unlock(&io_mutex);
+			}
+		}
 
-		if (my_io_index + io_base == io_nextupdate)
-			io_nextupdate = status_update(io_write, my_io_index +
-					io_base, jiffies - start_time);
+		if (data) {
+			if(my_io_index + io_base > io_nextupdate)
+				io_nextupdate = status_update(io_write,
+						my_io_index + io_base,
+						jiffies - start_time);
 
-		if (my_io_index == io_pc) {
-			printk(KERN_CONT "...%d%%", 20 * io_pc_step);
-			io_pc_step++;
-			io_pc = io_finish_at * io_pc_step / 5;
+			if (my_io_index > io_pc) {
+				printk(KERN_CONT "...%d%%", 20 * io_pc_step);
+				io_pc_step++;
+				io_pc = io_finish_at * io_pc_step / 5;
+			}
 		}
 
 		toi_cond_pause(0, NULL);
@@ -660,9 +677,6 @@ static int worker_rw_loop(void *data)
 		 */
 
 		mutex_lock(&io_mutex);
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "%d pages still to do, %d workers running.",
-				atomic_read(&io_count), atomic_read(&toi_io_workers));
-
 	} while (atomic_read(&io_count) >= atomic_read(&toi_io_workers) &&
 		!(io_write && test_result_state(TOI_ABORTED)));
 
@@ -761,10 +775,11 @@ static int do_rw_loop(int write, int finish_at, struct memory_bitmap *pageflags,
 
 	memory_bm_position_reset(pageset1_map);
 
+	mutex_lock(&io_mutex);
+
 	clear_toi_state(TOI_IO_STOPPED);
 
-	if (!test_action_state(TOI_NO_MULTITHREADED_IO) &&
-		(write || !toi_force_no_multithreaded))
+	if (!test_action_state(TOI_NO_MULTITHREADED_IO))
 		num_other_threads = start_other_threads();
 
 	if (!num_other_threads || !toiActiveAllocator->io_flusher ||
@@ -780,6 +795,8 @@ static int do_rw_loop(int write, int finish_at, struct memory_bitmap *pageflags,
 
 	memory_bm_set_iterators(pageset1_copy_map, workers_started);
 	memory_bm_position_reset(pageset1_copy_map);
+
+	mutex_unlock(&io_mutex);
 
 	if (flusher)
 		result = toiActiveAllocator->io_flusher(write);
@@ -1585,7 +1602,9 @@ static int __read_pageset1(void)
 		(char *) &toi_header->pagedir, sizeof(pagedir1));
 	toi_result = toi_header->param0;
 	if (!toi_bkd.toi_debug_state) {
-		toi_bkd.toi_action = toi_header->param1;
+		toi_bkd.toi_action =
+			(toi_header->param1 & ~toi_bootflags_mask) |
+			(toi_bkd.toi_action & toi_bootflags_mask);
 		toi_bkd.toi_debug_state = toi_header->param2;
 		toi_bkd.toi_default_console_level = toi_header->param3;
 	}

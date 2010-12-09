@@ -93,17 +93,6 @@ void copyback_post(void)
 	struct toi_boot_kernel_data *bkd =
 		(struct toi_boot_kernel_data *) boot_kernel_data_buffer;
 
-	/*
-	 * The boot kernel's data may be larger (newer version) or
-	 * smaller (older version) than ours. Copy the minimum
-	 * of the two sizes, so that we don't overwrite valid values
-	 * from pre-atomic copy.
-	 */
-
-	memcpy(&toi_bkd, (char *) boot_kernel_data_buffer,
-			min_t(int, sizeof(struct toi_boot_kernel_data),
-				bkd->size));
-
 	if (toi_activate_storage(1))
 		panic("Failed to reactivate our storage.");
 
@@ -265,6 +254,22 @@ int toi_hibernate(void)
 	toi_running = 1; /* For the swsusp code we use :< */
 
 	error = toi_lowlevel_builtin();
+
+	if (!error) {
+		struct toi_boot_kernel_data *bkd =
+			(struct toi_boot_kernel_data *) boot_kernel_data_buffer;
+
+		/*
+		 * The boot kernel's data may be larger (newer version) or
+		 * smaller (older version) than ours. Copy the minimum
+		 * of the two sizes, so that we don't overwrite valid values
+		 * from pre-atomic copy.
+		 */
+
+		memcpy(&toi_bkd, (char *) boot_kernel_data_buffer,
+			min_t(int, sizeof(struct toi_boot_kernel_data),
+				bkd->size));
+	}
 
 	toi_running = 0;
 	return error;

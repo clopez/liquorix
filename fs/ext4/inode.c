@@ -1192,8 +1192,10 @@ static pgoff_t ext4_num_dirty_pages(struct inode *inode, pgoff_t idx,
 				break;
 			idx++;
 			num++;
-			if (num >= max_pages)
+			if (num >= max_pages) {
+				done = 1;
 				break;
+			}
 		}
 		pagevec_release(&pvec);
 	}
@@ -2392,9 +2394,9 @@ static int ext4_bh_delay_or_unwritten(handle_t *handle, struct buffer_head *bh)
  * The function finds extents of pages and scan them for all blocks.
  */
 static int __mpage_da_writepage(struct page *page,
-				struct writeback_control *wbc, void *data)
+				struct writeback_control *wbc,
+				struct mpage_da_data *mpd)
 {
-	struct mpage_da_data *mpd = data;
 	struct inode *inode = mpd->inode;
 	struct buffer_head *bh, *head;
 	sector_t logical;
@@ -2798,25 +2800,32 @@ static int ext4_da_writepages_trans_blocks(struct inode *inode)
  */
 static int write_cache_pages_da(struct address_space *mapping,
 				struct writeback_control *wbc,
-				struct mpage_da_data *mpd)
+				struct mpage_da_data *mpd,
+				pgoff_t *done_index)
 {
 	int ret = 0;
 	int done = 0;
 	struct pagevec pvec;
-	int nr_pages;
+	unsigned nr_pages;
 	pgoff_t index;
 	pgoff_t end;		/* Inclusive */
 	long nr_to_write = wbc->nr_to_write;
+	int tag;
 
 	pagevec_init(&pvec, 0);
 	index = wbc->range_start >> PAGE_CACHE_SHIFT;
 	end = wbc->range_end >> PAGE_CACHE_SHIFT;
 
+	if (wbc->sync_mode == WB_SYNC_ALL)
+		tag = PAGECACHE_TAG_TOWRITE;
+	else
+		tag = PAGECACHE_TAG_DIRTY;
+
+	*done_index = index;
 	while (!done && (index <= end)) {
 		int i;
 
-		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index,
-			      PAGECACHE_TAG_DIRTY,
+		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
 			      min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 		if (nr_pages == 0)
 			break;
@@ -2835,6 +2844,8 @@ static int write_cache_pages_da(struct address_space *mapping,
 				done = 1;
 				break;
 			}
+
+			*done_index = page->index + 1;
 
 			lock_page(page);
 
@@ -2921,6 +2932,8 @@ static int ext4_da_writepages(struct address_space *mapping,
 	long desired_nr_to_write, nr_to_writebump = 0;
 	loff_t range_start = wbc->range_start;
 	struct ext4_sb_info *sbi = EXT4_SB(mapping->host->i_sb);
+	pgoff_t done_index = 0;
+	pgoff_t end;
 
 	trace_ext4_da_writepages(inode, wbc);
 
@@ -2956,8 +2969,11 @@ static int ext4_da_writepages(struct address_space *mapping,
 		wbc->range_start = index << PAGE_CACHE_SHIFT;
 		wbc->range_end  = LLONG_MAX;
 		wbc->range_cyclic = 0;
-	} else
+		end = -1;
+	} else {
 		index = wbc->range_start >> PAGE_CACHE_SHIFT;
+		end = wbc->range_end >> PAGE_CACHE_SHIFT;
+	}
 
 	/*
 	 * This works around two forms of stupidity.  The first is in
@@ -2976,9 +2992,12 @@ static int ext4_da_writepages(struct address_space *mapping,
 	 * sbi->max_writeback_mb_bump whichever is smaller.
 	 */
 	max_pages = sbi->s_max_writeback_mb_bump << (20 - PAGE_CACHE_SHIFT);
-	if (!range_cyclic && range_whole)
-		desired_nr_to_write = wbc->nr_to_write * 8;
-	else
+	if (!range_cyclic && range_whole) {
+		if (wbc->nr_to_write == LONG_MAX)
+			desired_nr_to_write = wbc->nr_to_write;
+		else
+			desired_nr_to_write = wbc->nr_to_write * 8;
+	} else
 		desired_nr_to_write = ext4_num_dirty_pages(inode, index,
 							   max_pages);
 	if (desired_nr_to_write > max_pages)
@@ -2995,6 +3014,9 @@ static int ext4_da_writepages(struct address_space *mapping,
 	pages_skipped = wbc->pages_skipped;
 
 retry:
+	if (wbc->sync_mode == WB_SYNC_ALL)
+		tag_pages_for_writeback(mapping, index, end);
+
 	while (!ret && wbc->nr_to_write > 0) {
 
 		/*
@@ -3033,7 +3055,7 @@ retry:
 		mpd.io_done = 0;
 		mpd.pages_written = 0;
 		mpd.retval = 0;
-		ret = write_cache_pages_da(mapping, wbc, &mpd);
+		ret = write_cache_pages_da(mapping, wbc, &mpd, &done_index);
 		/*
 		 * If we have a contiguous extent of pages and we
 		 * haven't done the I/O yet, map the blocks and submit
@@ -3089,14 +3111,13 @@ retry:
 			 __func__, wbc->nr_to_write, ret);
 
 	/* Update index */
-	index += pages_written;
 	wbc->range_cyclic = range_cyclic;
 	if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
 		/*
 		 * set the writeback_index so that range_cyclic
 		 * mode will write it back later
 		 */
-		mapping->writeback_index = index;
+		mapping->writeback_index = done_index;
 
 out_writepages:
 	wbc->nr_to_write -= nr_to_writebump;
@@ -3814,14 +3835,14 @@ out:
 	}
 	wq = EXT4_SB(io_end->inode->i_sb)->dio_unwritten_wq;
 
-	/* queue the work to convert unwritten extents to written */
-	queue_work(wq, &io_end->work);
-
 	/* Add the io_end to per-inode completed aio dio list*/
 	ei = EXT4_I(io_end->inode);
 	spin_lock_irqsave(&ei->i_completed_io_lock, flags);
 	list_add_tail(&io_end->list, &ei->i_completed_io_list);
 	spin_unlock_irqrestore(&ei->i_completed_io_lock, flags);
+
+	/* queue the work to convert unwritten extents to written */
+	queue_work(wq, &io_end->work);
 	iocb->private = NULL;
 }
 

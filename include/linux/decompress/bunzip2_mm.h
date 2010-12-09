@@ -7,7 +7,6 @@
 #else
 /* Compile for initramfs/initrd code only */
 #define INIT __init
-static void(*error)(char *m);
 #endif
 
 #endif

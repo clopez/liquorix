@@ -22,11 +22,11 @@
  */
 
 #include <asm/unaligned.h>
-#include <linux/slab.h>
 #include <linux/buffer_head.h>
 #include <linux/mutex.h>
 #include <linux/vmalloc.h>
 #include <linux/decompress/unlzma.h>
+#include <linux/slab.h>
 
 #include "squashfs_fs.h"
 #include "squashfs_fs_sb.h"
@@ -51,7 +51,7 @@ static void error(char *m)
 	lzma_error = 1;
 }
 
-
+	
 static void *lzma_init(struct squashfs_sb_info *msblk)
 {
 	struct squashfs_lzma *stream = kzalloc(sizeof(*stream), GFP_KERNEL);

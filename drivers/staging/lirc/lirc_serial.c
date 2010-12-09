@@ -80,8 +80,8 @@
 #define UART_IE_IXP42X_UUE   0x40 /* IXP42X UART Unit enable */
 #define UART_IE_IXP42X_RTOIE 0x10 /* IXP42X Receiver Data Timeout int.enable */
 
-#include "lirc.h"
-#include "lirc_dev.h"
+#include <media/lirc.h>
+#include <media/lirc_dev.h>
 
 #define LIRC_DRIVER_NAME "lirc_serial"
 
@@ -234,13 +234,10 @@ static struct lirc_serial hardware[] = {
 /* This MUST be a power of two!  It has to be larger than 1 as well. */
 
 #define RBUF_LEN 256
-#define WBUF_LEN 256
 
 static struct timeval lasttv = {0, 0};
 
 static struct lirc_buffer rbuf;
-
-static int wbuf[WBUF_LEN];
 
 static unsigned int freq = 38000;
 static unsigned int duty_cycle = 50;
@@ -468,7 +465,7 @@ static long send_pulse_irdeo(unsigned long length)
 	if (i == 0)
 		ret = (-rawbits) * 10000 / 1152;
 	else
-		ret = (3 - i) * 3 *10000 / 1152 + (-rawbits) * 10000 / 1152;
+		ret = (3 - i) * 3 * 10000 / 1152 + (-rawbits) * 10000 / 1152;
 
 	return ret;
 }
@@ -960,17 +957,17 @@ static ssize_t lirc_write(struct file *file, const char *buf,
 	int i, count;
 	unsigned long flags;
 	long delta = 0;
+	int *wbuf;
 
-	if (!(hardware[type].features&LIRC_CAN_SEND_PULSE))
+	if (!(hardware[type].features & LIRC_CAN_SEND_PULSE))
 		return -EBADF;
 
-	if (n % sizeof(int))
-		return -EINVAL;
 	count = n / sizeof(int);
-	if (count > WBUF_LEN || count % 2 == 0)
+	if (n % sizeof(int) || count % 2 == 0)
 		return -EINVAL;
-	if (copy_from_user(wbuf, buf, n))
-		return -EFAULT;
+	wbuf = memdup_user(buf, n);
+	if (PTR_ERR(wbuf))
+		return PTR_ERR(wbuf);
 	spin_lock_irqsave(&hardware[type].lock, flags);
 	if (type == LIRC_IRDEO) {
 		/* DTR, RTS down */
@@ -978,7 +975,7 @@ static ssize_t lirc_write(struct file *file, const char *buf,
 	}
 	for (i = 0; i < count; i++) {
 		if (i%2)
-			hardware[type].send_space(wbuf[i]-delta);
+			hardware[type].send_space(wbuf[i] - delta);
 		else
 			delta = hardware[type].send_pulse(wbuf[i]);
 	}
@@ -987,8 +984,7 @@ static ssize_t lirc_write(struct file *file, const char *buf,
 	return n;
 }
 
-static int lirc_ioctl(struct inode *node, struct file *filep, unsigned int cmd,
-		      unsigned long arg)
+static long lirc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 {
 	int result;
 	unsigned long value;
@@ -1049,15 +1045,15 @@ static int lirc_ioctl(struct inode *node, struct file *filep, unsigned int cmd,
 		break;
 
 	default:
-		return lirc_dev_fop_ioctl(node, filep, cmd, arg);
+		return lirc_dev_fop_ioctl(filep, cmd, arg);
 	}
 	return 0;
 }
 
-static struct file_operations lirc_fops = {
+static const struct file_operations lirc_fops = {
 	.owner		= THIS_MODULE,
 	.write		= lirc_write,
-	.ioctl		= lirc_ioctl,
+	.unlocked_ioctl	= lirc_ioctl,
 	.read		= lirc_dev_fop_read,
 	.poll		= lirc_dev_fop_poll,
 	.open		= lirc_dev_fop_open,
@@ -1237,6 +1233,7 @@ static int __init lirc_serial_init_module(void)
 	if (result < 0)
 		goto exit_serial_exit;
 	driver.features = hardware[type].features;
+	driver.dev = &lirc_serial_dev->dev;
 	driver.minor = lirc_register_driver(&driver);
 	if (driver.minor < 0) {
 		printk(KERN_ERR  LIRC_DRIVER_NAME

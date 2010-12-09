@@ -57,14 +57,14 @@
 #include <linux/mutex.h>
 #include <linux/kthread.h>
 
-#include "lirc_dev.h"
-#include "lirc.h"
+#include <media/lirc_dev.h>
+#include <media/lirc.h>
 
 struct IR {
 	struct lirc_driver l;
 
 	/* Device info */
-	struct mutex lock;
+	struct mutex ir_lock;
 	int open;
 
 	/* RX device */
@@ -164,7 +164,7 @@ static int add_to_buf(struct IR *ir)
 		 * Lock i2c bus for the duration.  RX/TX chips interfere so
 		 * this is worth it
 		 */
-		mutex_lock(&ir->lock);
+		mutex_lock(&ir->ir_lock);
 
 		/*
 		 * Send random "poll command" (?)  Windows driver does this
@@ -174,7 +174,7 @@ static int add_to_buf(struct IR *ir)
 		if (ret != 1) {
 			zilog_error("i2c_master_send failed with %d\n",	ret);
 			if (failures >= 3) {
-				mutex_unlock(&ir->lock);
+				mutex_unlock(&ir->ir_lock);
 				zilog_error("unable to read from the IR chip "
 					    "after 3 resets, giving up\n");
 				return ret;
@@ -189,12 +189,12 @@ static int add_to_buf(struct IR *ir)
 			ir->need_boot = 1;
 
 			++failures;
-			mutex_unlock(&ir->lock);
+			mutex_unlock(&ir->ir_lock);
 			continue;
 		}
 
 		ret = i2c_master_recv(&ir->c_rx, keybuf, sizeof(keybuf));
-		mutex_unlock(&ir->lock);
+		mutex_unlock(&ir->ir_lock);
 		if (ret != sizeof(keybuf)) {
 			zilog_error("i2c_master_recv failed with %d -- "
 				    "keeping last read buffer\n", ret);
@@ -910,7 +910,7 @@ static ssize_t write(struct file *filep, const char *buf, size_t n,
 		return -EINVAL;
 
 	/* Lock i2c bus for the duration */
-	mutex_lock(&ir->lock);
+	mutex_lock(&ir->ir_lock);
 
 	/* Send each keypress */
 	for (i = 0; i < n;) {
@@ -918,7 +918,7 @@ static ssize_t write(struct file *filep, const char *buf, size_t n,
 		int command;
 
 		if (copy_from_user(&command, buf + i, sizeof(command))) {
-			mutex_unlock(&ir->lock);
+			mutex_unlock(&ir->ir_lock);
 			return -EFAULT;
 		}
 
@@ -934,7 +934,7 @@ static ssize_t write(struct file *filep, const char *buf, size_t n,
 			ret = send_code(ir, (unsigned)command >> 16,
 					    (unsigned)command & 0xFFFF);
 			if (ret == -EPROTO) {
-				mutex_unlock(&ir->lock);
+				mutex_unlock(&ir->ir_lock);
 				return ret;
 			}
 		}
@@ -951,7 +951,7 @@ static ssize_t write(struct file *filep, const char *buf, size_t n,
 			if (failures >= 3) {
 				zilog_error("unable to send to the IR chip "
 					    "after 3 resets, giving up\n");
-				mutex_unlock(&ir->lock);
+				mutex_unlock(&ir->ir_lock);
 				return ret;
 			}
 			set_current_state(TASK_UNINTERRUPTIBLE);
@@ -963,7 +963,7 @@ static ssize_t write(struct file *filep, const char *buf, size_t n,
 	}
 
 	/* Release i2c bus */
-	mutex_unlock(&ir->lock);
+	mutex_unlock(&ir->ir_lock);
 
 	/* All looks good */
 	return n;
@@ -992,8 +992,7 @@ static unsigned int poll(struct file *filep, poll_table *wait)
 	return ret;
 }
 
-static int ioctl(struct inode *node, struct file *filep, unsigned int cmd,
-		      unsigned long arg)
+static long ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 {
 	struct IR *ir = (struct IR *)filep->private_data;
 	int result;
@@ -1067,15 +1066,15 @@ static int open(struct inode *node, struct file *filep)
 	ir = ir_devices[minor];
 
 	/* increment in use count */
-	mutex_lock(&ir->lock);
+	mutex_lock(&ir->ir_lock);
 	++ir->open;
 	ret = set_use_inc(ir);
 	if (ret != 0) {
 		--ir->open;
-		mutex_unlock(&ir->lock);
+		mutex_unlock(&ir->ir_lock);
 		return ret;
 	}
-	mutex_unlock(&ir->lock);
+	mutex_unlock(&ir->ir_lock);
 
 	/* stash our IR struct */
 	filep->private_data = ir;
@@ -1094,10 +1093,10 @@ static int close(struct inode *node, struct file *filep)
 	}
 
 	/* decrement in use count */
-	mutex_lock(&ir->lock);
+	mutex_lock(&ir->ir_lock);
 	--ir->open;
 	set_use_dec(ir);
-	mutex_unlock(&ir->lock);
+	mutex_unlock(&ir->ir_lock);
 
 	return 0;
 }
@@ -1133,13 +1132,13 @@ static struct i2c_driver driver = {
 	.id_table	= ir_transceiver_id,
 };
 
-static struct file_operations lirc_fops = {
+static const struct file_operations lirc_fops = {
 	.owner		= THIS_MODULE,
 	.llseek		= lseek,
 	.read		= read,
 	.write		= write,
 	.poll		= poll,
-	.ioctl		= ioctl,
+	.unlocked_ioctl	= ioctl,
 	.open		= open,
 	.release	= close
 };
@@ -1148,7 +1147,7 @@ static int ir_remove(struct i2c_client *client)
 {
 	struct IR *ir = i2c_get_clientdata(client);
 
-	mutex_lock(&ir->lock);
+	mutex_lock(&ir->ir_lock);
 
 	if (ir->have_rx || ir->have_tx) {
 		DECLARE_COMPLETION(tn);
@@ -1167,7 +1166,7 @@ static int ir_remove(struct i2c_client *client)
 		}
 
 	} else {
-		mutex_unlock(&ir->lock);
+		mutex_unlock(&ir->ir_lock);
 		zilog_error("%s: detached from something we didn't "
 			    "attach to\n", __func__);
 		return -ENODEV;
@@ -1181,7 +1180,7 @@ static int ir_remove(struct i2c_client *client)
 
 	/* free memory */
 	lirc_buffer_free(&ir->buf);
-	mutex_unlock(&ir->lock);
+	mutex_unlock(&ir->ir_lock);
 	kfree(ir);
 
 	return 0;
@@ -1197,14 +1196,6 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	dprintk("%s: adapter id=0x%x, client addr=0x%02x\n",
 		__func__, adap->id, client->addr);
-
-	/* if this isn't an appropriate device, bail w/-ENODEV now */
-	if (!(adap->id == I2C_HW_B_BT848 ||
-#ifdef I2C_HW_B_HDPVR
-	      adap->id == I2C_HW_B_HDPVR ||
-#endif
-	      adap->id == I2C_HW_B_CX2341X))
-		goto out_nodev;
 
 	/*
 	 * The external IR receiver is at i2c address 0x71.
@@ -1245,7 +1236,7 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	if (ret)
 		goto out_nomem;
 
-	mutex_init(&ir->lock);
+	mutex_init(&ir->ir_lock);
 	mutex_init(&ir->buf_lock);
 	ir->need_boot = 1;
 
@@ -1261,7 +1252,7 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		memcpy(&ir->c_rx, client, sizeof(struct i2c_client));
 
 		ir->c_rx.addr = 0x71;
-		strncpy(ir->c_rx.name, ZILOG_HAUPPAUGE_IR_RX_NAME,
+		strlcpy(ir->c_rx.name, ZILOG_HAUPPAUGE_IR_RX_NAME,
 			I2C_NAME_SIZE);
 
 		/* try to fire up polling thread */
@@ -1282,7 +1273,7 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	if (have_tx) {
 		memcpy(&ir->c_tx, client, sizeof(struct i2c_client));
 		ir->c_tx.addr = 0x70;
-		strncpy(ir->c_tx.name, ZILOG_HAUPPAUGE_IR_TX_NAME,
+		strlcpy(ir->c_tx.name, ZILOG_HAUPPAUGE_IR_TX_NAME,
 			I2C_NAME_SIZE);
 		ir->have_tx = 1;
 	}

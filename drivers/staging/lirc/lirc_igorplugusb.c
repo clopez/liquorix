@@ -47,11 +47,10 @@
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/usb.h>
-#include <linux/smp_lock.h>
 #include <linux/time.h>
 
-#include "lirc.h"
-#include "lirc_dev.h"
+#include <media/lirc.h>
+#include <media/lirc_dev.h>
 
 
 /* module identification */

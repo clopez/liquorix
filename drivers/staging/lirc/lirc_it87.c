@@ -28,6 +28,9 @@
  * 2005/06/05 Andrew Calkin implemented support for Asus Digimatrix,
  *   based on work of the following member of the Outertrack Digimatrix
  *   Forum: Art103 <r_tay@hotmail.com>
+ * 2009/12/24 James Edwards <jimbo-lirc@edwardsclan.net> implemeted support
+ *   for ITE8704/ITE8718, on my machine, the DSDT reports 8704, but the
+ *   chip identifies as 18.
  */
 
 #include <linux/module.h>
@@ -38,7 +41,6 @@
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
 #include <linux/kernel.h>
-#include <linux/serial_reg.h>
 #include <linux/time.h>
 #include <linux/string.h>
 #include <linux/types.h>
@@ -52,9 +54,10 @@
 #include <linux/fcntl.h>
 
 #include <linux/timer.h>
+#include <linux/pnp.h>
 
-#include "lirc.h"
-#include "lirc_dev.h"
+#include <media/lirc.h>
+#include <media/lirc_dev.h>
 
 #include "lirc_it87.h"
 
@@ -73,7 +76,6 @@ static unsigned long it87_send_counter;
 static unsigned char it87_RXEN_mask = IT87_CIR_RCR_RXEN;
 
 #define RBUF_LEN 1024
-#define WBUF_LEN 1024
 
 #define LIRC_DRIVER_NAME "lirc_it87"
 
@@ -107,10 +109,12 @@ static DECLARE_WAIT_QUEUE_HEAD(lirc_read_queue);
 
 static DEFINE_SPINLOCK(hardware_lock);
 static DEFINE_SPINLOCK(dev_lock);
+static bool device_open;
 
 static int rx_buf[RBUF_LEN];
 unsigned int rx_tail, rx_head;
-static int tx_buf[WBUF_LEN];
+
+static struct pnp_driver it87_pnp_driver;
 
 /* SECTION: Prototypes */
 
@@ -122,8 +126,7 @@ static ssize_t lirc_read(struct file *file, char *buf,
 			 size_t count, loff_t *ppos);
 static ssize_t lirc_write(struct file *file, const char *buf,
 			  size_t n, loff_t *pos);
-static int lirc_ioctl(struct inode *node, struct file *filep,
-		      unsigned int cmd, unsigned long arg);
+static long lirc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
 static void add_read_queue(int flag, unsigned long val);
 static int init_chrdev(void);
 static void drop_chrdev(void);
@@ -145,10 +148,11 @@ static void drop_port(void);
 static int lirc_open(struct inode *inode, struct file *file)
 {
 	spin_lock(&dev_lock);
-	if (module_refcount(THIS_MODULE)) {
+	if (device_open) {
 		spin_unlock(&dev_lock);
 		return -EBUSY;
 	}
+	device_open = true;
 	spin_unlock(&dev_lock);
 	return 0;
 }
@@ -156,6 +160,9 @@ static int lirc_open(struct inode *inode, struct file *file)
 
 static int lirc_close(struct inode *inode, struct file *file)
 {
+	spin_lock(&dev_lock);
+	device_open = false;
+	spin_unlock(&dev_lock);
 	return 0;
 }
 
@@ -203,11 +210,13 @@ static ssize_t lirc_write(struct file *file, const char *buf,
 			  size_t n, loff_t *pos)
 {
 	int i = 0;
+	int *tx_buf;
 
-	if (n % sizeof(int) || (n / sizeof(int)) > WBUF_LEN)
+	if (n % sizeof(int))
 		return -EINVAL;
-	if (copy_from_user(tx_buf, buf, n))
-		return -EFAULT;
+	tx_buf = memdup_user(buf, n);
+	if (IS_ERR(tx_buf))
+		return PTR_ERR(tx_buf);
 	n /= sizeof(int);
 	init_send();
 	while (1) {
@@ -227,8 +236,7 @@ static ssize_t lirc_write(struct file *file, const char *buf,
 }
 
 
-static int lirc_ioctl(struct inode *node, struct file *filep,
-		      unsigned int cmd, unsigned long arg)
+static long lirc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 {
 	int retval = 0;
 	unsigned long value = 0;
@@ -326,12 +334,12 @@ static void add_read_queue(int flag, unsigned long val)
 }
 
 
-static struct file_operations lirc_fops = {
+static const struct file_operations lirc_fops = {
 	.owner		= THIS_MODULE,
 	.read		= lirc_read,
 	.write		= lirc_write,
 	.poll		= lirc_poll,
-	.ioctl		= lirc_ioctl,
+	.unlocked_ioctl	= lirc_ioctl,
 	.open		= lirc_open,
 	.release	= lirc_close,
 };
@@ -360,7 +368,6 @@ static struct lirc_driver driver = {
 };
 
 
-#ifdef MODULE
 static int init_chrdev(void)
 {
 	driver.minor = lirc_register_driver(&driver);
@@ -377,7 +384,6 @@ static void drop_chrdev(void)
 {
 	lirc_unregister_driver(driver.minor);
 }
-#endif
 
 
 /* SECTION: Hardware */
@@ -516,7 +522,7 @@ static irqreturn_t it87_interrupt(int irq, void *dev_id)
 				del_timer(&timerlist);
 				data = inb(io + IT87_CIR_DR);
 
-				dprintk("data=%.2x\n", data);
+				dprintk("data=%02x\n", data);
 				do_gettimeofday(&curr_tv);
 				deltv = delta(&last_tv, &curr_tv);
 				deltintrtv = delta(&last_intr_tv, &curr_tv);
@@ -791,20 +797,22 @@ static int init_port(void)
 		return retval;
 	}
 	it87_chipid = it87_read(IT87_CHIP_ID2);
-	if ((it87_chipid != 0x12) &&
-		(it87_chipid != 0x05) &&
+	if ((it87_chipid != 0x05) &&
+		(it87_chipid != 0x12) &&
+		(it87_chipid != 0x18) &&
 		(it87_chipid != 0x20)) {
 		printk(KERN_INFO LIRC_DRIVER_NAME
-		       ": no IT8705/12/20 found, exiting..\n");
+		       ": no IT8704/05/12/18/20 found (claimed IT87%02x), "
+		       "exiting..\n", it87_chipid);
 		retval = -ENXIO;
 		return retval;
 	}
 	printk(KERN_INFO LIRC_DRIVER_NAME
-	       ": found IT87%.2x.\n",
+	       ": found IT87%02x.\n",
 	       it87_chipid);
 
 	/* get I/O-Port and IRQ */
-	if (it87_chipid == 0x12)
+	if (it87_chipid == 0x12 || it87_chipid == 0x18)
 		ldn = IT8712_CIR_LDN;
 	else
 		ldn = IT8705_CIR_LDN;
@@ -917,20 +925,32 @@ static int init_lirc_it87(void)
 	return 0;
 }
 
-
-static int __init lirc_it87_init(void)
+static int it87_probe(struct pnp_dev *pnp_dev,
+		      const struct pnp_device_id *dev_id)
 {
 	int retval;
+
+	driver.dev = &pnp_dev->dev;
 
 	retval = init_chrdev();
 	if (retval < 0)
 		return retval;
+
 	retval = init_lirc_it87();
-	if (retval) {
-		drop_chrdev();
-		return retval;
-	}
+	if (retval)
+		goto init_lirc_it87_failed;
+
 	return 0;
+
+init_lirc_it87_failed:
+	drop_chrdev();
+
+	return retval;
+}
+
+static int __init lirc_it87_init(void)
+{
+	return pnp_register_driver(&it87_pnp_driver);
 }
 
 
@@ -939,13 +959,29 @@ static void __exit lirc_it87_exit(void)
 	drop_hardware();
 	drop_chrdev();
 	drop_port();
+	pnp_unregister_driver(&it87_pnp_driver);
 	printk(KERN_INFO LIRC_DRIVER_NAME ": Uninstalled.\n");
 }
+
+/* SECTION: PNP for ITE8704/18 */
+
+static const struct pnp_device_id pnp_dev_table[] = {
+	{"ITE8704", 0},
+	{}
+};
+
+MODULE_DEVICE_TABLE(pnp, pnp_dev_table);
+
+static struct pnp_driver it87_pnp_driver = {
+	.name           = LIRC_DRIVER_NAME,
+	.id_table       = pnp_dev_table,
+	.probe		= it87_probe,
+};
 
 module_init(lirc_it87_init);
 module_exit(lirc_it87_exit);
 
-MODULE_DESCRIPTION("LIRC driver for ITE IT8712/IT8705 CIR port");
+MODULE_DESCRIPTION("LIRC driver for ITE IT8704/05/12/18/20 CIR port");
 MODULE_AUTHOR("Hans-Gunter Lutke Uphues");
 MODULE_LICENSE("GPL");
 

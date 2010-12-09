@@ -50,7 +50,7 @@ static struct uuid_info uuid_list[] = {
  { "vfat", "vfat", 0, 0, 1, "\353", 0x0, 0, 0 },
  { "vfat", "vfat", 0, 0, 1, "\351", 0x0, 0, 0 },
  { "vfat", "vfat", 0, 0x1fe, 2, "\125\252", 0x0, 0, 0 },
- { "xfs", "xfs", 0, 0, 4, "XFSB", 0x14, 0, 0 },
+ { "xfs", "xfs", 0, 0, 4, "XFSB", 0x20, 0, 0 },
  { "romfs", "romfs", 0, 0, 8, "-rom1fs-", 0x0, 0, 0 },
  { "bfs", "bfs", 0, 0, 4, "\316\372\173\033", 0, 0, 0 },
  { "cramfs", "cramfs", 0, 0, 4, "E=\315\050", 0x0, 0, 0 },
@@ -317,7 +317,7 @@ int part_matches_fs_info(struct hd_struct *part, struct fs_info *seek)
 	got = fs_info_from_block_dev(bdev);
 
 	if (got && !memcmp(got->uuid, seek->uuid, 16)) {
-		PRINTK(" Having matching UUID.\n");
+		PRINTK(" Have matching UUID.\n");
 		PRINTK(" Got: LMS %d, LM %p.\n", got->last_mount_size, got->last_mount);
 		PRINTK(" Seek: LMS %d, LM %p.\n", seek->last_mount_size, seek->last_mount);
 		result = 1;
@@ -334,11 +334,11 @@ int part_matches_fs_info(struct hd_struct *part, struct fs_info *seek)
 				result = 3;
 				PRINTK(" Matching dev_t.\n");
 			} else
-				PRINTK("Dev_ts differ (%lx vs %lx).\n", part_devt(part), seek->dev_t);
+				PRINTK("Dev_ts differ (%x vs %x).\n", part_devt(part), seek->dev_t);
 		}
 	}
 
-	PRINTK(" Score for %lx is %d.\n", part_devt(part), result);
+	PRINTK(" Score for %x is %d.\n", part_devt(part), result);
 	free_fs_info(got);
 out:
 	blkdev_put(bdev, FMODE_READ);
@@ -420,12 +420,17 @@ struct fs_info *fs_info_from_block_dev(struct block_device *bdev)
 			goto no_uuid;
 
 		if (!uuid_data || uuid_pg_num != last_uuid_pg_num) {
-			if (uuid_data_page)
-				__free_page(uuid_data_page);
-			uuid_data_page = read_bdev_page(bdev, uuid_pg_num);
-			if (!uuid_data_page)
-				continue;
-			uuid_data = page_address(uuid_data_page);
+			/* No need to reread the page from above */
+			if (uuid_pg_num == pg_num && uuid_data)
+				memcpy(uuid_data, data, PAGE_SIZE);
+			else {
+				if (uuid_data_page)
+					__free_page(uuid_data_page);
+				uuid_data_page = read_bdev_page(bdev, uuid_pg_num);
+				if (!uuid_data_page)
+					continue;
+				uuid_data = page_address(uuid_data_page);
+			}
 		}
 
 		last_uuid_pg_num = uuid_pg_num;

@@ -48,8 +48,8 @@
 #include <linux/poll.h>
 #include <linux/parport.h>
 
-#include "lirc.h"
-#include "lirc_dev.h"
+#include <media/lirc.h>
+#include <media/lirc_dev.h>
 
 #include "lirc_parallel.h"
 
@@ -77,10 +77,8 @@ unsigned int timer;
 unsigned int default_timer = LIRC_TIMER;
 #endif
 
-#define WBUF_SIZE (256)
 #define RBUF_SIZE (256) /* this must be a power of 2 larger than 1 */
 
-static int wbuf[WBUF_SIZE];
 static int rbuf[RBUF_SIZE];
 
 DECLARE_WAIT_QUEUE_HEAD(lirc_wait);
@@ -242,7 +240,7 @@ static void irq_handler(void *blah)
 	unsigned int level, newlevel;
 	unsigned int timeout;
 
-	if (!module_refcount(THIS_MODULE))
+	if (!is_open)
 		return;
 
 	if (!is_claimed)
@@ -382,20 +380,19 @@ static ssize_t lirc_write(struct file *filep, const char *buf, size_t n,
 	unsigned int level, newlevel;
 	unsigned long flags;
 	int counttimer;
+	int *wbuf;
 
 	if (!is_claimed)
 		return -EBUSY;
 
-	if (n % sizeof(int))
-		return -EINVAL;
-
 	count = n / sizeof(int);
 
-	if (count > WBUF_SIZE || count % 2 == 0)
+	if (n % sizeof(int) || count % 2 == 0)
 		return -EINVAL;
 
-	if (copy_from_user(wbuf, buf, n))
-		return -EFAULT;
+	wbuf = memdup_user(buf, n);
+	if (IS_ERR(wbuf))
+		return PTR_ERR(wbuf);
 
 #ifdef LIRC_TIMER
 	if (timer == 0) {
@@ -464,8 +461,7 @@ static unsigned int lirc_poll(struct file *file, poll_table *wait)
 	return 0;
 }
 
-static int lirc_ioctl(struct inode *node, struct file *filep, unsigned int cmd,
-		      unsigned long arg)
+static long lirc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 {
 	int result;
 	unsigned long features = LIRC_CAN_SET_TRANSMITTER_MASK |
@@ -519,7 +515,7 @@ static int lirc_ioctl(struct inode *node, struct file *filep, unsigned int cmd,
 
 static int lirc_open(struct inode *node, struct file *filep)
 {
-	if (module_refcount(THIS_MODULE) || !lirc_claim())
+	if (is_open || !lirc_claim())
 		return -EBUSY;
 
 	parport_enable_irq(pport);
@@ -543,13 +539,13 @@ static int lirc_close(struct inode *node, struct file *filep)
 	return 0;
 }
 
-static struct file_operations lirc_fops = {
+static const struct file_operations lirc_fops = {
 	.owner		= THIS_MODULE,
 	.llseek		= lirc_lseek,
 	.read		= lirc_read,
 	.write		= lirc_write,
 	.poll		= lirc_poll,
-	.ioctl		= lirc_ioctl,
+	.unlocked_ioctl	= lirc_ioctl,
 	.open		= lirc_open,
 	.release	= lirc_close
 };

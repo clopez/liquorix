@@ -19,19 +19,19 @@
  * USA
  */
 
-#include "lirc.h"
-#include "lirc_dev.h"
+#include <media/lirc.h>
+#include <media/lirc_dev.h>
 
 /* hardware address */
 #define ENE_STATUS		0	 /* hardware status - unused */
-#define ENE_ADDR_HI 		1	 /* hi byte of register address */
-#define ENE_ADDR_LO 		2	 /* low byte of register address */
-#define ENE_IO 			3	 /* read/write window */
+#define ENE_ADDR_HI		1	 /* hi byte of register address */
+#define ENE_ADDR_LO		2	 /* low byte of register address */
+#define ENE_IO			3	 /* read/write window */
 #define ENE_MAX_IO		4
 
 /* 8 bytes of samples, divided in 2 halfs*/
-#define ENE_SAMPLE_BUFFER 	0xF8F0	 /* regular sample buffer */
-#define ENE_SAMPLE_SPC_MASK 	(1 << 7) /* sample is space */
+#define ENE_SAMPLE_BUFFER	0xF8F0	 /* regular sample buffer */
+#define ENE_SAMPLE_SPC_MASK	(1 << 7) /* sample is space */
 #define ENE_SAMPLE_VALUE_MASK	0x7F
 #define ENE_SAMPLE_OVERFLOW	0x7F
 #define ENE_SAMPLES_SIZE	4
@@ -108,7 +108,7 @@
 #define ENE_TX_PORT2_EN		(1 << 1)
 
 #define ENE_TX_INPUT		0xFEC9	 /* next byte to transmit */
-#define ENE_TX_SPC_MASK 	(1 << 7) /* Transmitted sample is space */
+#define ENE_TX_SPC_MASK		(1 << 7) /* Transmitted sample is space */
 #define ENE_TX_UNK1		0xFECB	 /* set to 0x63 */
 #define ENE_TX_SMPL_PERIOD	50	 /* transmit sample period */
 
@@ -119,7 +119,7 @@
 
 /* Hardware versions */
 #define ENE_HW_VERSION		0xFF00	 /* hardware revision */
-#define ENE_HW_UNK 		0xFF1D
+#define ENE_HW_UNK		0xFF1D
 #define ENE_HW_UNK_CLR		(1 << 2)
 #define ENE_HW_VER_MAJOR	0xFF1E	 /* chip version */
 #define ENE_HW_VER_MINOR	0xFF1F
@@ -127,12 +127,12 @@
 
 #define same_sign(a, b) ((((a) > 0) && (b) > 0) || ((a) < 0 && (b) < 0))
 
-#define ENE_DRIVER_NAME 	"enecir"
-#define ENE_MAXGAP 		250000	 /* this is amount of time we wait
+#define ENE_DRIVER_NAME		"enecir"
+#define ENE_MAXGAP		250000	 /* this is amount of time we wait
 					 before turning the sampler, chosen
 					 arbitry */
 
-#define space(len) 	       (-(len))	 /* add a space */
+#define space(len)	       (-(len))	 /* add a space */
 
 /* software defines */
 #define ENE_IRQ_RX		1

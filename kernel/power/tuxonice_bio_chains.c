@@ -199,11 +199,11 @@ void toi_extent_state_goto_start(void)
 	struct toi_bdev_info *this = prio_chain_head;
 
 	while (this) {
-		toi_message(TOI_IO, TOI_VERBOSE, 0,
+		toi_message(TOI_BIO, TOI_VERBOSE, 0,
 			"Setting current extent to %p.", this->blocks.first);
 		this->blocks.current_extent = this->blocks.first;
 		if (this->blocks.current_extent) {
-			toi_message(TOI_IO, TOI_VERBOSE, 0,
+			toi_message(TOI_BIO, TOI_VERBOSE, 0,
 					"Setting current offset to %lu.",
 					this->blocks.current_extent->start);
 			this->blocks.current_offset =
@@ -213,10 +213,10 @@ void toi_extent_state_goto_start(void)
 		this = this->next;
 	}
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Setting current chain to %p.",
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Setting current chain to %p.",
 			prio_chain_head);
 	toi_writer_posn.current_chain = prio_chain_head;
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Leaving extent state goto start.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Leaving extent state goto start.");
 }
 
 /**
@@ -235,11 +235,11 @@ void toi_extent_state_save(int slot)
 	struct hibernate_extent_saved_state *chain_state;
 	int i = 0;
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "toi_extent_state_save, slot %d.",
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "toi_extent_state_save, slot %d.",
 			slot);
 
 	if (!toi_writer_posn.current_chain) {
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "No current chain => "
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, "No current chain => "
 				"chain_num = -1.");
 		toi_writer_posn.saved_chain_number[slot] = -1;
 		return;
@@ -247,7 +247,7 @@ void toi_extent_state_save(int slot)
 
 	while (cur_chain) {
 		i++;
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "Saving chain %d (%p) "
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, "Saving chain %d (%p) "
 				"state, slot %d.", i, cur_chain, slot);
 
 		chain_state = &cur_chain->saved_state[slot];
@@ -256,13 +256,13 @@ void toi_extent_state_save(int slot)
 
 		if (toi_writer_posn.current_chain == cur_chain) {
 			toi_writer_posn.saved_chain_number[slot] = i;
-			toi_message(TOI_IO, TOI_VERBOSE, 0, "This is the chain "
+			toi_message(TOI_BIO, TOI_VERBOSE, 0, "This is the chain "
 					"we were on => chain_num is %d.", i);
 		}
 
 		if (!cur_chain->blocks.current_extent) {
 			chain_state->extent_num = 0;
-			toi_message(TOI_IO, TOI_VERBOSE, 0, "No current extent "
+			toi_message(TOI_BIO, TOI_VERBOSE, 0, "No current extent "
 					"for this chain => extent_num %d is 0.",
 					i);
 			cur_chain = cur_chain->next;
@@ -277,12 +277,12 @@ void toi_extent_state_save(int slot)
 			extent = extent->next;
 		}
 
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "extent num %d is %d.", i,
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, "extent num %d is %d.", i,
 				chain_state->extent_num);
 
 		cur_chain = cur_chain->next;
 	}
-	toi_message(TOI_IO, TOI_VERBOSE, 0,
+	toi_message(TOI_BIO, TOI_VERBOSE, 0,
 			"Completed saving extent state slot %d.", slot);
 }
 
@@ -297,7 +297,7 @@ void toi_extent_state_restore(int slot)
 	struct toi_bdev_info *cur_chain = prio_chain_head;
 	struct hibernate_extent_saved_state *chain_state;
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0,
+	toi_message(TOI_BIO, TOI_VERBOSE, 0,
 			"toi_extent_state_restore - slot %d.", slot);
 
 	if (toi_writer_posn.saved_chain_number[slot] == -1) {
@@ -309,7 +309,7 @@ void toi_extent_state_restore(int slot)
 		int posn;
 		int j;
 		i++;
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "Restoring chain %d (%p) "
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, "Restoring chain %d (%p) "
 				"state, slot %d.", i, cur_chain, slot);
 
 		chain_state = &cur_chain->saved_state[slot];
@@ -321,14 +321,14 @@ void toi_extent_state_restore(int slot)
 
 		if (i == toi_writer_posn.saved_chain_number[slot]) {
 			toi_writer_posn.current_chain = cur_chain;
-			toi_message(TOI_IO, TOI_VERBOSE, 0,
+			toi_message(TOI_BIO, TOI_VERBOSE, 0,
 					"Found current chain.");
 		}
 
 		for (j = 0; j < 4; j++)
 			if (i == toi_writer_posn.saved_chain_number[j]) {
 				toi_writer_posn.saved_chain_ptr[j] = cur_chain;
-				toi_message(TOI_IO, TOI_VERBOSE, 0,
+				toi_message(TOI_BIO, TOI_VERBOSE, 0,
 					"Found saved chain ptr %d (%p) (offset"
 					" %d).", j, cur_chain,
 					cur_chain->saved_state[j].offset);
@@ -343,7 +343,7 @@ void toi_extent_state_restore(int slot)
 
 		cur_chain = cur_chain->next;
 	}
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Done.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Done.");
 	if (test_action_state(TOI_LOGALL))
 		dump_block_chains();
 }
@@ -415,7 +415,7 @@ static int toi_serialise_extent_chain(struct toi_bdev_info *chain)
 
 	if (test_action_state(TOI_LOGALL))
 		dump_block_chains();
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Serialising chain (dev_t %lx).",
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Serialising chain (dev_t %lx).",
 			chain->dev_t);
 	/* Device info -  dev_t, prio, bmap_shift, blocks per page, positions */
 	ret = toiActiveAllocator->rw_header_chunk(WRITE, &toi_blockwriter_ops,
@@ -429,12 +429,12 @@ static int toi_serialise_extent_chain(struct toi_bdev_info *chain)
 	if (ret)
 		return ret;
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "%d extents.",
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "%d extents.",
 			chain->blocks.num_extents);
 
 	this = chain->blocks.first;
 	while (this) {
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "Extent %d.", i);
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, "Extent %d.", i);
 		ret = toiActiveAllocator->rw_header_chunk(WRITE,
 				&toi_blockwriter_ops,
 				(char *) this, 2 * sizeof(this->start));
@@ -453,7 +453,7 @@ int toi_serialise_extent_chains(void)
 	int result;
 
 	/* Write the number of chains */
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Write number of chains (%d)",
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Write number of chains (%d)",
 			num_chains);
 	result = toiActiveAllocator->rw_header_chunk(WRITE,
 			&toi_blockwriter_ops, (char *) &num_chains,
@@ -473,7 +473,7 @@ int toi_serialise_extent_chains(void)
 	 * Finally, the chain we should be on at the start of each
 	 * section.
 	 */
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Saved chain numbers.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Saved chain numbers.");
 	result = toiActiveAllocator->rw_header_chunk(WRITE,
 			&toi_blockwriter_ops,
 			(char *) &toi_writer_posn.saved_chain_number[0],
@@ -484,7 +484,7 @@ int toi_serialise_extent_chains(void)
 
 int toi_register_storage_chain(struct toi_bdev_info *new)
 {
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Inserting chain %p into list.",
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Inserting chain %p into list.",
 			new);
 	toi_insert_chain_in_prio_list(new);
 	return 0;
@@ -492,16 +492,16 @@ int toi_register_storage_chain(struct toi_bdev_info *new)
 
 static void free_bdev_info(struct toi_bdev_info *chain)
 {
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Free chain %p.", chain);
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Free chain %p.", chain);
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, " - Block extents.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, " - Block extents.");
 	toi_put_extent_chain(&chain->blocks);
 
 	/*
 	 * The allocator may need to do more than just free the chains
 	 * (swap_free, for example). Don't call from boot kernel.
 	 */
-	toi_message(TOI_IO, TOI_VERBOSE, 0, " - Allocator extents.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, " - Allocator extents.");
 	if (chain->allocator)
 		chain->allocator->bio_allocator_ops->free_storage(chain);
 
@@ -509,7 +509,7 @@ static void free_bdev_info(struct toi_bdev_info *chain)
 	 * Dropping out of reading atomic copy? Need to undo
 	 * toi_open_by_devnum.
 	 */
-	toi_message(TOI_IO, TOI_VERBOSE, 0, " - Bdev.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, " - Bdev.");
 	if (chain->bdev && !IS_ERR(chain->bdev) &&
 			chain->bdev != resume_block_device &&
 			chain->bdev != header_block_device &&
@@ -517,7 +517,7 @@ static void free_bdev_info(struct toi_bdev_info *chain)
 		toi_close_bdev(chain->bdev);
 
 	/* Poison */
-	toi_message(TOI_IO, TOI_VERBOSE, 0, " - Struct.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, " - Struct.");
 	toi_kfree(39, chain, sizeof(*chain));
 
 	if (prio_chain_head == chain)
@@ -560,7 +560,7 @@ int toi_load_extent_chain(int index, int *num_loaded)
 	struct hibernate_extent *this, *last = NULL;
 	int i, ret;
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Loading extent chain %d.", index);
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Loading extent chain %d.", index);
 	/* Get dev_t, prio, bmap_shift, blocks per page, positions */
 	ret = toiActiveAllocator->rw_header_chunk_noreadahead(READ, NULL,
 			(char *) &chain->uuid, metadata_size);
@@ -581,11 +581,11 @@ int toi_load_extent_chain(int index, int *num_loaded)
 		return 1;
 	}
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "%d extents.",
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "%d extents.",
 			chain->blocks.num_extents);
 
 	for (i = 0; i < chain->blocks.num_extents; i++) {
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "Extent %d.", i + 1);
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, "Extent %d.", i + 1);
 
 		this = toi_kzalloc(2, sizeof(struct hibernate_extent),
 				TOI_ATOMIC_GFP);
@@ -612,7 +612,7 @@ int toi_load_extent_chain(int index, int *num_loaded)
 			/*
 			 * Open the bdev
 			 */
-			toi_message(TOI_IO, TOI_VERBOSE, 0,
+			toi_message(TOI_BIO, TOI_VERBOSE, 0,
 				"Chain dev_t is %s. Resume dev t is %s. Header"
 				" bdev_t is %s.\n",
 				format_dev_t(b1, chain->dev_t),
@@ -632,7 +632,7 @@ int toi_load_extent_chain(int index, int *num_loaded)
 				}
 			}
 
-			toi_message(TOI_IO, TOI_VERBOSE, 0, "Chain bmap shift "
+			toi_message(TOI_BIO, TOI_VERBOSE, 0, "Chain bmap shift "
 					"is %d and blocks per page is %d.",
 					chain->bmap_shift,
 					chain->blocks_per_page);
@@ -695,10 +695,10 @@ int toi_load_extent_chains(void)
 			sizeof(int));
 	if (result)
 		return result;
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "%d chains to read.", to_load);
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "%d chains to read.", to_load);
 
 	for (i = 0; i < to_load; i++) {
-		toi_message(TOI_IO, TOI_VERBOSE, 0, " >> Loading chain %d/%d.",
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, " >> Loading chain %d/%d.",
 				i, to_load);
 		result = toi_load_extent_chain(i, &extents_loaded);
 		if (result)
@@ -709,7 +709,7 @@ int toi_load_extent_chains(void)
 	if (extents_loaded == 1)
 		set_up_start_position();
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Save chain numbers.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Save chain numbers.");
 	result = toiActiveAllocator->rw_header_chunk_noreadahead(READ,
 			&toi_blockwriter_ops,
 			(char *) &toi_writer_posn.saved_chain_number[0],
@@ -742,7 +742,7 @@ static int toi_end_of_stream(int writing, int section_barrier)
 			}
 		} else {
 			more_readahead = 0;
-			toi_message(TOI_IO, TOI_VERBOSE, 0,
+			toi_message(TOI_BIO, TOI_VERBOSE, 0,
 					"Reached the end of stream %d "
 					"(not an error).", current_stream);
 			return 1;
@@ -770,12 +770,12 @@ int go_next_page(int writing, int section_barrier)
 	if (toi_extent_state_next(max, current_stream)) {
 		/* Don't complain if readahead falls off the end */
 		if (writing && section_barrier) {
-			toi_message(TOI_IO, TOI_VERBOSE, 0, "Extent state eof. "
+			toi_message(TOI_BIO, TOI_VERBOSE, 0, "Extent state eof. "
 				"Expected compression ratio too optimistic?");
 			if (test_action_state(TOI_LOGALL))
 				dump_block_chains();
 		}
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "Ran out of extents to "
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, "Ran out of extents to "
 				"read/write. (Not necessarily a fatal error.");
 		return -ENOSPC;
 	}
@@ -819,17 +819,16 @@ int toi_bio_rw_page(int writing, struct page *page,
 			abort_hibernate(TOI_INSUFFICIENT_STORAGE,
 				"Insufficient storage for your image.");
 		else
-			toi_message(TOI_IO, TOI_VERBOSE, 0, "Seeking to "
+			toi_message(TOI_BIO, TOI_VERBOSE, 0, "Seeking to "
 				"read/write another page when stream has "
 				"ended.");
 		return -ENOSPC;
 	}
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0,
-			"%sing device %lx, sector %ld << %d.",
-			writing ? "Writ" : "Read",
-			dev_info->dev_t, dev_info->blocks.current_offset,
-			dev_info->bmap_shift);
+	toi_message(TOI_BIO, TOI_VERBOSE, 0,
+			"%s %lx:%ld",
+			writing ? "Write" : "Read",
+			dev_info->dev_t, dev_info->blocks.current_offset);
 
 	result = toi_do_io(writing, dev_info->bdev,
 		dev_info->blocks.current_offset << dev_info->bmap_shift,
@@ -879,12 +878,12 @@ static int apply_header_reservation(void)
 	int i;
 
 	if (!header_pages_reserved) {
-		toi_message(TOI_IO, TOI_VERBOSE, 0,
+		toi_message(TOI_BIO, TOI_VERBOSE, 0,
 				"No header pages reserved at the moment.");
 		return 0;
 	}
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Applying header reservation.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Applying header reservation.");
 
 	/* Apply header space reservation */
 	toi_extent_state_goto_start();
@@ -896,7 +895,7 @@ static int apply_header_reservation(void)
 	/* The end of header pages will be the start of pageset 2 */
 	toi_extent_state_save(2);
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0,
+	toi_message(TOI_BIO, TOI_VERBOSE, 0,
 			"Finished applying header reservation.");
 	return 0;
 }
@@ -910,7 +909,7 @@ static int toi_bio_register_storage(void)
 		if (!this_module->enabled ||
 		    this_module->type != BIO_ALLOCATOR_MODULE)
 			continue;
-		toi_message(TOI_IO, TOI_VERBOSE, 0,
+		toi_message(TOI_BIO, TOI_VERBOSE, 0,
 				"Registering storage from %s.",
 				this_module->name);
 		result = this_module->bio_allocator_ops->register_storage();
@@ -930,7 +929,7 @@ int toi_bio_allocate_storage(unsigned long request)
 
 	if (!chain) {
 		int result = toi_bio_register_storage();
-		toi_message(TOI_IO, TOI_VERBOSE, 0, "toi_bio_allocate_storage: "
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, "toi_bio_allocate_storage: "
 			"Registering storage.");
 		if (result)
 			return 0;
@@ -941,19 +940,19 @@ int toi_bio_allocate_storage(unsigned long request)
 		}
 	}
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "toi_bio_allocate_storage: "
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "toi_bio_allocate_storage: "
 			"Request is %lu pages.", request);
 	extra_pages = DIV_ROUND_UP(request * (sizeof(unsigned long)
 			       + sizeof(int)), PAGE_SIZE);
 	needed = request + extra_pages + header_pages_reserved;
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Adding %lu extra pages and %lu "
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Adding %lu extra pages and %lu "
 			"for header => %lu.",
 			extra_pages, header_pages_reserved, needed);
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Already allocated %lu pages.",
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Already allocated %lu pages.",
 			raw_pages_allocd);
 
 	to_get = needed > raw_pages_allocd ? needed - raw_pages_allocd : 0;
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Need to get %lu pages.", to_get);
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Need to get %lu pages.", to_get);
 
 	if (!to_get)
 		return apply_header_reservation();
@@ -967,7 +966,7 @@ int toi_bio_allocate_storage(unsigned long request)
 		unsigned long got_this_round = 0;
 		struct toi_bdev_info *top = chain;
 
-		toi_message(TOI_IO, TOI_VERBOSE, 0,
+		toi_message(TOI_BIO, TOI_VERBOSE, 0,
 				" Start of loop. To get is %lu. Divisor is %d.",
 				to_get, divisor);
 		no_free = 0;
@@ -980,11 +979,11 @@ int toi_bio_allocate_storage(unsigned long request)
 		for (i = 0; i < num_group; i++) {
 			struct toi_bio_allocator_ops *ops =
 				chain->allocator->bio_allocator_ops;
-			toi_message(TOI_IO, TOI_VERBOSE, 0,
+			toi_message(TOI_BIO, TOI_VERBOSE, 0,
 					" Asking for %lu pages from chain %p.",
 					portion, chain);
 			got = ops->allocate_storage(chain, portion);
-			toi_message(TOI_IO, TOI_VERBOSE, 0,
+			toi_message(TOI_BIO, TOI_VERBOSE, 0,
 					" Got %lu pages from allocator %p.",
 					got, chain);
 			if (!got)
@@ -992,7 +991,7 @@ int toi_bio_allocate_storage(unsigned long request)
 			got_this_round += got;
 			chain = chain->next;
 		}
-		toi_message(TOI_IO, TOI_VERBOSE, 0, " Loop finished. Got a "
+		toi_message(TOI_BIO, TOI_VERBOSE, 0, " Loop finished. Got a "
 				"total of %lu pages from %d allocators.",
 				got_this_round, divisor - no_free);
 
@@ -1011,12 +1010,12 @@ int toi_bio_allocate_storage(unsigned long request)
 			no_free = 0;
 	}
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Finished allocating. Calling "
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Finished allocating. Calling "
 			"get_main_pool_phys_params");
 	/* Now let swap allocator bmap the pages */
 	get_main_pool_phys_params();
 
-	toi_message(TOI_IO, TOI_VERBOSE, 0, "Done. Reserving header.");
+	toi_message(TOI_BIO, TOI_VERBOSE, 0, "Done. Reserving header.");
 	return apply_header_reservation();
 }
 

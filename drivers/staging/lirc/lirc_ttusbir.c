@@ -38,8 +38,8 @@
 #include <linux/slab.h>
 #include <linux/usb.h>
 
-#include "lirc.h"
-#include "lirc_dev.h"
+#include <media/lirc.h>
+#include <media/lirc_dev.h>
 
 MODULE_DESCRIPTION("TechnoTrend USB IR device driver for LIRC");
 MODULE_AUTHOR("Stefan Macher (st_maker-lirc@yahoo.de)");
@@ -141,8 +141,7 @@ static void set_use_dec(void *data)
  * still have about 14 samples per pulse/space, i.e. we sample with 14
  * times higher frequency than the signal frequency
  */
-const unsigned char map_table[] =
-{
+const unsigned char map_table[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

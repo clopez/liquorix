@@ -26,8 +26,8 @@
 #include <linux/pnp.h>
 #include <linux/io.h>
 
-#include "lirc.h"
-#include "lirc_dev.h"
+#include <media/lirc.h>
+#include <media/lirc_dev.h>
 
 #define LIRC_DRIVER_NAME "lirc_ite8709"
 
@@ -407,8 +407,8 @@ static int __devinit ite8709_pnp_probe(struct pnp_dev *dev,
 	ite8709_dev->use_count = 0;
 	ite8709_dev->irq = pnp_irq(dev, 0);
 	ite8709_dev->io = pnp_port_start(dev, 2);
-	ite8709_dev->hardware_lock = __SPIN_LOCK_UNLOCKED(
-					ite8709_dev->hardware_lock);
+	ite8709_dev->hardware_lock =
+		__SPIN_LOCK_UNLOCKED(ite8709_dev->hardware_lock);
 	ite8709_dev->acc_pulse = 0;
 	ite8709_dev->acc_space = 0;
 	ite8709_dev->lastbit = 0;
@@ -522,18 +522,17 @@ static struct pnp_driver ite8709_pnp_driver = {
 	.id_table       = pnp_dev_table,
 };
 
-static int __init ite8709_pnp_init(void)
+static int __init ite8709_init_module(void)
 {
 	return pnp_register_driver(&ite8709_pnp_driver);
 }
+module_init(ite8709_init_module);
 
-static void __exit ite8709_pnp_exit(void)
+static void __exit ite8709_cleanup_module(void)
 {
 	pnp_unregister_driver(&ite8709_pnp_driver);
 }
-
-module_init(ite8709_pnp_init);
-module_exit(ite8709_pnp_exit);
+module_exit(ite8709_cleanup_module);
 
 MODULE_DESCRIPTION("LIRC driver for ITE8709 CIR port");
 MODULE_AUTHOR("Grégory Lardière");

@@ -63,8 +63,8 @@
 
 #include <linux/timer.h>
 
-#include "lirc.h"
-#include "lirc_dev.h"
+#include <media/lirc.h>
+#include <media/lirc_dev.h>
 
 /* SECTION: Definitions */
 
@@ -172,7 +172,6 @@ static DEFINE_SPINLOCK(hardware_lock);
 
 static int rx_buf[RBUF_LEN];
 static unsigned int rx_tail, rx_head;
-static int tx_buf[WBUF_LEN];
 
 static int debug;
 #define dprintk(fmt, args...)						\
@@ -190,8 +189,7 @@ static ssize_t lirc_read(struct file *file, char *buf, size_t count,
 		loff_t *ppos);
 static ssize_t lirc_write(struct file *file, const char *buf, size_t n,
 		loff_t *pos);
-static int lirc_ioctl(struct inode *node, struct file *filep, unsigned int cmd,
-		unsigned long arg);
+static long lirc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
 static void add_read_queue(int flag, unsigned long val);
 static int init_chrdev(void);
 static void drop_chrdev(void);
@@ -295,26 +293,28 @@ static ssize_t lirc_write(struct file *file, const char *buf, size_t n,
 				loff_t *pos)
 {
 	unsigned long flags;
-	int i;
+	int i, count;
+	int *tx_buf;
 
-	if (n % sizeof(int) || (n / sizeof(int)) > WBUF_LEN)
+	count = n / sizeof(int);
+	if (n % sizeof(int) || count % 2 == 0)
 		return -EINVAL;
-	if (copy_from_user(tx_buf, buf, n))
-		return -EFAULT;
+	tx_buf = memdup_user(buf, n);
+	if (IS_ERR(tx_buf))
+		return PTR_ERR(tx_buf);
 	i = 0;
-	n /= sizeof(int);
 #ifdef LIRC_ON_SA1100
 	/* disable receiver */
 	Ser2UTCR3 = 0;
 #endif
 	local_irq_save(flags);
 	while (1) {
-		if (i >= n)
+		if (i >= count)
 			break;
 		if (tx_buf[i])
 			send_pulse(tx_buf[i]);
 		i++;
-		if (i >= n)
+		if (i >= count)
 			break;
 		if (tx_buf[i])
 			send_space(tx_buf[i]);
@@ -330,11 +330,10 @@ static ssize_t lirc_write(struct file *file, const char *buf, size_t n,
 	/* enable receiver */
 	Ser2UTCR3 = UTCR3_RXE|UTCR3_RIE;
 #endif
-	return n;
+	return count;
 }
 
-static int lirc_ioctl(struct inode *node, struct file *filep, unsigned int cmd,
-		unsigned long arg)
+static long lirc_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 {
 	int retval = 0;
 	unsigned long value = 0;
@@ -452,12 +451,12 @@ static void add_read_queue(int flag, unsigned long val)
 	wake_up_interruptible(&lirc_read_queue);
 }
 
-static struct file_operations lirc_fops = {
+static const struct file_operations lirc_fops = {
 	.owner		= THIS_MODULE,
 	.read		= lirc_read,
 	.write		= lirc_write,
 	.poll		= lirc_poll,
-	.ioctl		= lirc_ioctl,
+	.unlocked_ioctl	= lirc_ioctl,
 	.open		= lirc_dev_fop_open,
 	.release	= lirc_dev_fop_close,
 };
