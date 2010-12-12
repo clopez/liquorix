@@ -643,10 +643,9 @@ static inline struct task_group *task_group(struct task_struct *p)
 
 inline void update_rq_clock(struct rq *rq)
 {
-
 	if (rq->skip_clock_update)
 		return;
-
+}
 
 /*
  * Tunables that become constants when CONFIG_SCHED_DEBUG is off:
