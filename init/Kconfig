@@ -776,7 +776,6 @@ config DEBUG_BLK_CGROUP
 
 endif # CGROUPS
 
-	depends on SCHED_CFS
 config MM_OWNER
 	bool
 
