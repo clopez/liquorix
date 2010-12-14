@@ -23,7 +23,8 @@
 static int max_ypos = 25, max_xpos = 80;
 static int current_ypos = 25, current_xpos;
 
-static void early_vga_write(struct console *con, const char *str, unsigned n)
+static void early_vga_write(struct console *con, const char *str, unsigned n,
+                            unsigned int loglevel)
 {
 	char c;
 	int  i, k, j;
@@ -101,7 +102,8 @@ static int early_serial_putc(unsigned char ch)
 	return timeout ? 0 : -1;
 }
 
-static void early_serial_write(struct console *con, const char *s, unsigned n)
+static void early_serial_write(struct console *con, const char *s, unsigned n,
+                               unsigned int loglevel)
 {
 	while (*s && n-- > 0) {
 		if (*s == '\n')
@@ -180,7 +182,7 @@ asmlinkage void early_printk(const char *fmt, ...)
 
 	va_start(ap, fmt);
 	n = vscnprintf(buf, sizeof(buf), fmt, ap);
-	early_console->write(early_console, buf, n);
+	early_console->write(early_console, buf, n, 0);
 	va_end(ap);
 }
 

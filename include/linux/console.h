@@ -113,7 +113,7 @@ int con_debug_leave(void);
 
 struct console {
 	char	name[16];
-	void	(*write)(struct console *, const char *, unsigned);
+	void	(*write)(struct console *, const char *, unsigned, unsigned int);
 	int	(*read)(struct console *, char *, unsigned);
 	struct tty_driver *(*device)(struct console *, int *);
 	void	(*unblank)(void);
