@@ -36,8 +36,15 @@
 #define SCHED_FIFO		1
 #define SCHED_RR		2
 #define SCHED_BATCH		3
-/* SCHED_ISO: reserved but not implemented yet */
+/* SCHED_ISO: Implemented on BFS only */
 #define SCHED_IDLE		5
+#define SCHED_IDLEPRIO		SCHED_IDLE
+#ifdef CONFIG_SCHED_BFS
+#define SCHED_ISO		4
+#define SCHED_MAX		(SCHED_IDLEPRIO)
+#define SCHED_RANGE(policy)	((policy) <= SCHED_MAX)
+#endif
+
 /* Can be ORed in to make sure the process is reverted back to SCHED_NORMAL on fork */
 #define SCHED_RESET_ON_FORK     0x40000000
 
@@ -141,7 +148,6 @@ extern unsigned long nr_uninterruptible(void);
 extern unsigned long nr_iowait(void);
 extern unsigned long nr_iowait_cpu(int cpu);
 extern unsigned long this_cpu_load(void);
-
 
 extern void calc_global_load(void);
 
@@ -267,8 +273,6 @@ extern void sched_init_smp(void);
 extern asmlinkage void schedule_tail(struct task_struct *prev);
 extern void init_idle(struct task_struct *idle, int cpu);
 extern void init_idle_bootup_task(struct task_struct *idle);
-
-extern int runqueue_is_locked(int cpu);
 
 extern cpumask_var_t nohz_cpu_mask;
 #if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ)
@@ -852,6 +856,9 @@ struct sched_group {
 	 * single CPU.
 	 */
 	unsigned int cpu_power, cpu_power_orig;
+#ifdef CONFIG_SCHED_CFS
+	unsigned int group_weight;
+#endif
 
 	/*
 	 * The CPUs this group covers.
@@ -1020,6 +1027,22 @@ struct sched_domain;
 /*
  * wake flags
  */
+#ifdef CONFIG_SCHED_CFS
+#define WF_SYNC		(1 << 0)	/* waker goes to sleep after wakup */
+#define WF_FORK		(1 << 1)	/* child wakeup after fork */
+#define WF_INTERACTIVE	(1 << 2)	/* interactivity-driven wakeup */
+#define WF_TIMER	(1 << 3)	/* timer-driven wakeup */
+
+#define ENQUEUE_WAKEUP	(1 << 0)
+#define ENQUEUE_WAKING	(1 << 1)
+#define ENQUEUE_HEAD	(1 << 2)
+#define ENQUEUE_IO	(1 << 3)
+#define ENQUEUE_LATENCY	(1 << 4)
+#define ENQUEUE_TIMER	(1 << 5)
+
+#define DEQUEUE_SLEEP	(1 << 0)
+
+#else
 #define WF_SYNC		0x01		/* waker goes to sleep after wakup */
 #define WF_FORK		0x02		/* child wakeup after fork */
 
@@ -1028,6 +1051,7 @@ struct sched_domain;
 #define ENQUEUE_HEAD		4
 
 #define DEQUEUE_SLEEP		1
+#endif
 
 struct sched_class {
 	const struct sched_class *next;
@@ -1072,7 +1096,7 @@ struct sched_class {
 					 struct task_struct *task);
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
-	void (*moved_group) (struct task_struct *p, int on_rq);
+	void (*task_move_group) (struct task_struct *p, int on_rq);
 #endif
 };
 
@@ -1120,7 +1144,14 @@ struct sched_entity {
 	struct load_weight	load;		/* for load-balancing */
 	struct rb_node		run_node;
 	struct list_head	group_node;
+#ifdef CONFIG_SCHED_CFS
+	unsigned int		on_rq:1,
+				interactive:1,
+				timer:1,
+				fork_expedited:1;
+#else
 	unsigned int		on_rq;
+#endif
 
 	u64			exec_start;
 	u64			sum_exec_runtime;
@@ -1169,17 +1200,36 @@ struct task_struct {
 
 	int lock_depth;		/* BKL lock depth */
 
+#ifndef CONFIG_SCHED_BFS
 #ifdef CONFIG_SMP
 #ifdef __ARCH_WANT_UNLOCKED_CTXSW
 	int oncpu;
 #endif
 #endif
+#else /* CONFIG_SCHED_BFS */
+	int oncpu;
+#endif
 
 	int prio, static_prio, normal_prio;
 	unsigned int rt_priority;
+#ifdef CONFIG_SCHED_BFS
+	int time_slice;
+	/* Virtual deadline in niffies, and when the deadline was set */
+	u64 deadline, deadline_niffy;
+	struct list_head run_list;
+	u64 last_ran;
+	u64 sched_time; /* sched_clock time spent running */
+	/* Number of threads currently requesting CPU time */
+	unsigned long threads_running;
+	/* Depth of forks from init */
+	int fork_depth;
+
+	unsigned long rt_timeout;
+#else /* CONFIG_SCHED_BFS */
 	const struct sched_class *sched_class;
 	struct sched_entity se;
 	struct sched_rt_entity rt;
+#endif
 
 #ifdef CONFIG_PREEMPT_NOTIFIERS
 	/* list of struct preempt_notifier: */
@@ -1229,11 +1279,14 @@ struct task_struct {
 	unsigned did_exec:1;
 	unsigned in_execve:1;	/* Tell the LSMs that the process is doing an
 				 * execve */
-	unsigned in_iowait:1;
 
-
-	/* Revert to default priority/policy when forking */
-	unsigned sched_reset_on_fork:1;
+	unsigned sched_in_iowait:1;		/* Called io_schedule() */
+	unsigned sched_reset_on_fork:1;		/* Revert to default
+						 * priority/policy on fork */
+#ifdef CONFIG_SCHED_CFS
+	unsigned sched_wake_interactive:4;	/* User-driven wakeup */
+	unsigned sched_wake_timer:4;		/* Timer-driven wakeup */
+#endif
 
 	pid_t pid;
 	pid_t tgid;
@@ -1274,6 +1327,9 @@ struct task_struct {
 	int __user *clear_child_tid;		/* CLONE_CHILD_CLEARTID */
 
 	cputime_t utime, stime, utimescaled, stimescaled;
+#ifdef CONFIG_SCHED_BFS
+	unsigned long utime_pc, stime_pc;
+#endif
 	cputime_t gtime;
 #ifndef CONFIG_VIRT_CPU_ACCOUNTING
 	cputime_t prev_utime, prev_stime;
@@ -1496,6 +1552,85 @@ struct task_struct {
 #endif
 };
 
+#ifdef CONFIG_SCHED_CFS
+static inline void sched_wake_interactive_enable(void)
+{
+	current->sched_wake_interactive++;
+}
+
+static inline void sched_wake_interactive_disable(void)
+{
+	current->sched_wake_interactive--;
+}
+
+static inline void sched_wake_timer_enable(void)
+{
+	current->sched_wake_timer++;
+}
+
+static inline void sched_wake_timer_disable(void)
+{
+	current->sched_wake_timer--;
+}
+#endif
+
+#ifdef CONFIG_SCHED_BFS
+extern int grunqueue_is_locked(void);
+extern void grq_unlock_wait(void);
+#define tsk_seruntime(t)		((t)->sched_time)
+#define tsk_rttimeout(t)		((t)->rt_timeout)
+
+static inline void tsk_cpus_current(struct task_struct *p)
+{
+}
+
+#define runqueue_is_locked(cpu)	grunqueue_is_locked()
+
+static inline void print_scheduler_version(void)
+{
+	printk(KERN_INFO"BFS CPU scheduler v0.357 by Con Kolivas.\n");
+}
+
+static inline int iso_task(struct task_struct *p)
+{
+	return (p->policy == SCHED_ISO);
+}
+extern void remove_cpu(unsigned long cpu);
+#else /* CFS */
+extern int runqueue_is_locked(int cpu);
+#define tsk_seruntime(t)	((t)->se.sum_exec_runtime)
+#define tsk_rttimeout(t)	((t)->rt.timeout)
+
+static inline void tsk_cpus_current(struct task_struct *p)
+{
+	p->rt.nr_cpus_allowed = current->rt.nr_cpus_allowed;
+}
+
+static inline void print_scheduler_version(void)
+{
+	printk(KERN_INFO"CFS CPU scheduler.\n");
+}
+
+static inline int iso_task(struct task_struct *p)
+{
+	return 0;
+}
+
+static inline void remove_cpu(unsigned long cpu)
+{
+}
+
+/* Anyone feel like implementing this? 
+static inline int above_background_load(void)
+{
+	return 1;
+}
+*/
+#endif /* CONFIG_SCHED_BFS */
+
+/* CFS and BFS */
+extern int above_background_load(void);
+
 /* Future-safe accessor for struct task_struct's cpus_allowed. */
 #define tsk_cpus_allowed(tsk) (&(tsk)->cpus_allowed)
 
@@ -1514,9 +1649,19 @@ struct task_struct {
 
 #define MAX_USER_RT_PRIO	100
 #define MAX_RT_PRIO		MAX_USER_RT_PRIO
-
-#define MAX_PRIO		(MAX_RT_PRIO + 40)
 #define DEFAULT_PRIO		(MAX_RT_PRIO + 20)
+
+#ifdef CONFIG_SCHED_BFS
+#define PRIO_RANGE		(40)
+#define MAX_PRIO		(MAX_RT_PRIO + PRIO_RANGE)
+#define ISO_PRIO		(MAX_RT_PRIO)
+#define NORMAL_PRIO		(MAX_RT_PRIO + 1)
+#define IDLE_PRIO		(MAX_RT_PRIO + 2)
+#define PRIO_LIMIT		((IDLE_PRIO) + 1)
+#else /* CONFIG_SCHED_BFS */
+#define MAX_PRIO		(MAX_RT_PRIO + 40)
+#define NORMAL_PRIO		DEFAULT_PRIO
+#endif /* CONFIG_SCHED_BFS */
 
 static inline int rt_prio(int prio)
 {
@@ -1831,7 +1976,7 @@ task_sched_runtime(struct task_struct *task);
 extern unsigned long long thread_group_sched_runtime(struct task_struct *task);
 
 /* sched_exec is called by processes performing an exec */
-#ifdef CONFIG_SMP
+#if defined(CONFIG_SMP) && !defined(CONFIG_SCHED_BFS)
 extern void sched_exec(void);
 #else
 #define sched_exec()   {}
