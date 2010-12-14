@@ -21,6 +21,49 @@ config USB_HID
 	  To compile this driver as a module, choose M here: the
 	  module will be called usbhid.
 
+config USB_HID_MOUSE_POLLING
+	bool "USB HID Mouse Interrupt Polling"
+	default n
+	depends on USB_HID
+	help
+	 This option enables USB HID mouse polling instead of an event
+	 based system.  This option is only recommended for badly designed
+	 USB chipsets.
+
+	 If unsure, say N.
+
+config USB_HID_MOUSE_POLLING_INTERVAL
+	int "USB HID Mouse Interrupt Polling Interval"
+	default 10
+	depends on USB_HID_MOUSE_POLLING
+	help
+	  The "USB HID Mouse Interrupt Polling Interval" is the interval, at
+	  which your USB HID mouse is to be polled at. The interval is
+	  specified in milliseconds.
+
+	  Decreasing the interval will, of course, give you a much more
+	  precise mouse.
+
+	  Generally speaking, a polling interval of 2 ms should be more than
+	  enough for most people, and is great for gaming and other things
+	  that require high precision.
+
+	  An interval lower than 10ms is not guaranteed work on your
+	  specific piece of hardware. If you want to play it safe, don't
+	  change this value.
+
+	  Now, if you indeed want to feel the joy of a precise mouse, the
+	  following mice are known to work without problems, when the interval
+	  is set to at least 2 ms:
+
+	    * Logitech's MX-family
+	    * Logitech Mouse Man Dual Optical
+	    * Logitech iFeel
+	    * Microsoft Intellimouse Explorer
+	    * Microsoft Intellimouse Optical 1.1
+
+	  If unsure, keep it at 10 ms.
+
 comment "Input core support is needed for USB HID input layer or HIDBP support"
 	depends on USB_HID && INPUT=n
 
