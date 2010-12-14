@@ -43,7 +43,7 @@ void nilfs_btnode_cache_init_once(struct address_space *btnc)
 	INIT_LIST_HEAD(&btnc->private_list);
 	spin_lock_init(&btnc->private_lock);
 
-	spin_lock_init(&btnc->i_mmap_lock);
+	mutex_init(&btnc->i_mmap_lock);
 	INIT_RAW_PRIO_TREE_ROOT(&btnc->i_mmap);
 	INIT_LIST_HEAD(&btnc->i_mmap_nonlinear);
 }
