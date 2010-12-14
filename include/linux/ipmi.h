@@ -294,6 +294,9 @@ int ipmi_create_user(unsigned int          if_num,
    safe, too. */
 int ipmi_destroy_user(ipmi_user_t user);
 
+/* Get the IPMI BMC's device struct */
+struct device *ipmi_get_bmcdevice(int ipmi_intf);
+
 /* Get the IPMI version of the BMC we are talking to. */
 void ipmi_get_version(ipmi_user_t   user,
 		      unsigned char *major,
