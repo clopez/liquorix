@@ -1,8 +1,8 @@
 /*
  * Squashfs - a compressed read only filesystem for Linux
  *
- * Copyright (c) 2010 LG Electronics
- * Chan Jeong <chan.jeong@lge.com>
+ * Copyright (c) 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009
+ * Phillip Lougher <phillip@lougher.demon.co.uk>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -18,14 +18,15 @@
  * along with this program; if not, write to the Free Software
  * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
- * lzo_wrapper.c
+ * lzma_wrapper.c
  */
 
-#include <linux/mutex.h>
+#include <asm/unaligned.h>
 #include <linux/buffer_head.h>
-#include <linux/slab.h>
+#include <linux/mutex.h>
 #include <linux/vmalloc.h>
-#include <linux/lzo.h>
+#include <linux/decompress/unlzma.h>
+#include <linux/slab.h>
 
 #include "squashfs_fs.h"
 #include "squashfs_fs_sb.h"
@@ -33,22 +34,33 @@
 #include "squashfs.h"
 #include "decompressor.h"
 
-struct squashfs_lzo {
+struct squashfs_lzma {
 	void	*input;
 	void	*output;
 };
 
-static void *lzo_init(struct squashfs_sb_info *msblk)
-{
-	int block_size = max_t(int, msblk->block_size, SQUASHFS_METADATA_SIZE);
+/* decompress_unlzma.c is currently non re-entrant... */
+DEFINE_MUTEX(lzma_mutex);
 
-	struct squashfs_lzo *stream = kzalloc(sizeof(*stream), GFP_KERNEL);
+/* decompress_unlzma.c doesn't provide any context in its callbacks... */
+static int lzma_error;
+
+static void error(char *m)
+{
+	ERROR("unlzma error: %s\n", m);
+	lzma_error = 1;
+}
+
+	
+static void *lzma_init(struct squashfs_sb_info *msblk)
+{
+	struct squashfs_lzma *stream = kzalloc(sizeof(*stream), GFP_KERNEL);
 	if (stream == NULL)
 		goto failed;
-	stream->input = vmalloc(block_size);
+	stream->input = vmalloc(msblk->block_size);
 	if (stream->input == NULL)
 		goto failed;
-	stream->output = vmalloc(block_size);
+	stream->output = vmalloc(msblk->block_size);
 	if (stream->output == NULL)
 		goto failed2;
 
@@ -57,15 +69,15 @@ static void *lzo_init(struct squashfs_sb_info *msblk)
 failed2:
 	vfree(stream->input);
 failed:
-	ERROR("Failed to allocate lzo workspace\n");
+	ERROR("failed to allocate lzma workspace\n");
 	kfree(stream);
 	return NULL;
 }
 
 
-static void lzo_free(void *strm)
+static void lzma_free(void *strm)
 {
-	struct squashfs_lzo *stream = strm;
+	struct squashfs_lzma *stream = strm;
 
 	if (stream) {
 		vfree(stream->input);
@@ -75,16 +87,15 @@ static void lzo_free(void *strm)
 }
 
 
-static int lzo_uncompress(struct squashfs_sb_info *msblk, void **buffer,
+static int lzma_uncompress(struct squashfs_sb_info *msblk, void **buffer,
 	struct buffer_head **bh, int b, int offset, int length, int srclength,
 	int pages)
 {
-	struct squashfs_lzo *stream = msblk->stream;
+	struct squashfs_lzma *stream = msblk->stream;
 	void *buff = stream->input;
 	int avail, i, bytes = length, res;
-	size_t out_len = srclength;
 
-	mutex_lock(&msblk->read_data_mutex);
+	mutex_lock(&lzma_mutex);
 
 	for (i = 0; i < b; i++) {
 		wait_on_buffer(bh[i]);
@@ -99,20 +110,24 @@ static int lzo_uncompress(struct squashfs_sb_info *msblk, void **buffer,
 		put_bh(bh[i]);
 	}
 
-	res = lzo1x_decompress_safe(stream->input, (size_t)length,
-					stream->output, &out_len);
-	if (res != LZO_E_OK)
+	lzma_error = 0;
+	res = unlzma(stream->input, length, NULL, NULL, stream->output, NULL,
+							error);
+	if (res || lzma_error)
 		goto failed;
 
-	res = bytes = (int)out_len;
+	/* uncompressed size is stored in the LZMA header (5 byte offset) */
+	res = bytes = get_unaligned_le32(stream->input + 5);
 	for (i = 0, buff = stream->output; bytes && i < pages; i++) {
 		avail = min_t(int, bytes, PAGE_CACHE_SIZE);
 		memcpy(buffer[i], buff, avail);
 		buff += avail;
 		bytes -= avail;
 	}
+	if (bytes)
+		goto failed;
 
-	mutex_unlock(&msblk->read_data_mutex);
+	mutex_unlock(&lzma_mutex);
 	return res;
 
 block_release:
@@ -120,17 +135,18 @@ block_release:
 		put_bh(bh[i]);
 
 failed:
-	mutex_unlock(&msblk->read_data_mutex);
+	mutex_unlock(&lzma_mutex);
 
-	ERROR("lzo decompression failed, data probably corrupt\n");
+	ERROR("lzma decompression failed, data probably corrupt\n");
 	return -EIO;
 }
 
-const struct squashfs_decompressor squashfs_lzo_comp_ops = {
-	.init = lzo_init,
-	.free = lzo_free,
-	.decompress = lzo_uncompress,
-	.id = LZO_COMPRESSION,
-	.name = "lzo",
+const struct squashfs_decompressor squashfs_lzma_comp_ops = {
+	.init = lzma_init,
+	.free = lzma_free,
+	.decompress = lzma_uncompress,
+	.id = LZMA_COMPRESSION,
+	.name = "lzma",
 	.supported = 1
 };
+

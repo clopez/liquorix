@@ -21,7 +21,7 @@
  * xattr.h
  */
 
-#ifdef CONFIG_SQUASHFS_XATTR
+#ifdef CONFIG_SQUASHFS_XATTRS
 extern __le64 *squashfs_read_xattr_id_table(struct super_block *, u64,
 		u64 *, int *);
 extern int squashfs_xattr_lookup(struct super_block *, unsigned int, int *,
