@@ -1,8 +1,8 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 36
-EXTRAVERSION = .2
-NAME = Flesh-Eating Bats with Fangs
+EXTRAVERSION = -zen2
+NAME = Mulberry Race Car
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
