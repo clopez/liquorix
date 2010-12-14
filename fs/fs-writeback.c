@@ -326,6 +326,8 @@ static int
 writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 {
 	struct address_space *mapping = inode->i_mapping;
+	long per_file_limit = wbc->per_file_limit;
+	long uninitialized_var(nr_to_write);
 	unsigned dirty;
 	int ret;
 
@@ -361,7 +363,15 @@ writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 	inode->i_state &= ~I_DIRTY_PAGES;
 	spin_unlock(&inode_lock);
 
+	if (per_file_limit) {
+		nr_to_write = wbc->nr_to_write;
+		wbc->nr_to_write = per_file_limit;
+	}
+
 	ret = do_writepages(mapping, wbc);
+
+	if (per_file_limit)
+		wbc->nr_to_write += nr_to_write - per_file_limit;
 
 	/*
 	 * Make sure to wait on the data before writing out the metadata.
@@ -694,6 +704,7 @@ static long wb_writeback(struct bdi_writeback *wb,
 
 		wbc.more_io = 0;
 		wbc.nr_to_write = write_chunk;
+		wbc.per_file_limit = write_chunk;
 		wbc.pages_skipped = 0;
 
 		trace_wbc_writeback_start(&wbc, wb->bdi);

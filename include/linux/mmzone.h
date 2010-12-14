@@ -424,6 +424,9 @@ struct zone {
 typedef enum {
 	ZONE_RECLAIM_LOCKED,		/* prevents concurrent reclaim */
 	ZONE_OOM_LOCKED,		/* zone is in OOM killer zonelist */
+	ZONE_CONGESTED,			/* zone has many dirty pages backed by
+					 * a congested BDI
+					 */
 } zone_flags_t;
 
 static inline void zone_set_flag(struct zone *zone, zone_flags_t flag)
@@ -441,6 +444,11 @@ static inline void zone_clear_flag(struct zone *zone, zone_flags_t flag)
 	clear_bit(flag, &zone->flags);
 }
 
+static inline int zone_is_reclaim_congested(const struct zone *zone)
+{
+	return test_bit(ZONE_CONGESTED, &zone->flags);
+}
+
 static inline int zone_is_reclaim_locked(const struct zone *zone)
 {
 	return test_bit(ZONE_RECLAIM_LOCKED, &zone->flags);
@@ -450,12 +458,6 @@ static inline int zone_is_oom_locked(const struct zone *zone)
 {
 	return test_bit(ZONE_OOM_LOCKED, &zone->flags);
 }
-
-#ifdef CONFIG_SMP
-unsigned long zone_nr_free_pages(struct zone *zone);
-#else
-#define zone_nr_free_pages(zone) zone_page_state(zone, NR_FREE_PAGES)
-#endif /* CONFIG_SMP */
 
 /*
  * The "priority" of VM scanning is how much of the queues we will scan in one
@@ -655,7 +657,9 @@ typedef struct pglist_data {
 extern struct mutex zonelists_mutex;
 void build_all_zonelists(void *data);
 void wakeup_kswapd(struct zone *zone, int order);
-int zone_watermark_ok(struct zone *z, int order, unsigned long mark,
+bool zone_watermark_ok(struct zone *z, int order, unsigned long mark,
+		int classzone_idx, int alloc_flags);
+bool zone_watermark_ok_safe(struct zone *z, int order, unsigned long mark,
 		int classzone_idx, int alloc_flags);
 enum memmap_context {
 	MEMMAP_EARLY,
