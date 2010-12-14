@@ -2474,6 +2474,7 @@ int vt_kmsg_redirect(int new)
 	else
 		return kmsg_con;
 }
+EXPORT_SYMBOL_GPL(vt_kmsg_redirect);
 
 #ifdef CONFIG_VT_CKO
 static unsigned int printk_color[8] __read_mostly = {
