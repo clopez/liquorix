@@ -852,7 +852,6 @@ struct sched_group {
 	 * single CPU.
 	 */
 	unsigned int cpu_power, cpu_power_orig;
-	unsigned int group_weight;
 
 	/*
 	 * The CPUs this group covers.
