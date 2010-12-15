@@ -968,8 +968,7 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 static unsigned long zap_pte_range(struct mmu_gather *tlb,
 				struct vm_area_struct *vma, pmd_t *pmd,
 				unsigned long addr, unsigned long end,
-				long *zap_work, struct zap_details *details,
-				bool activate)
+				long *zap_work, struct zap_details *details)
 {
 	struct mm_struct *mm = tlb->mm;
 	pte_t *pte;
@@ -1027,8 +1026,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 				if (pte_dirty(ptent))
 					set_page_dirty(page);
 				if (pte_young(ptent) &&
-				    likely(!VM_SequentialReadHint(vma)) &&
-					activate)
+				    likely(!VM_SequentialReadHint(vma)))
 					mark_page_accessed(page);
 				rss[MM_FILEPAGES]--;
 			}
@@ -1068,8 +1066,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 				struct vm_area_struct *vma, pud_t *pud,
 				unsigned long addr, unsigned long end,
-				long *zap_work, struct zap_details *details,
-				bool activate)
+				long *zap_work, struct zap_details *details)
 {
 	pmd_t *pmd;
 	unsigned long next;
@@ -1082,7 +1079,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			continue;
 		}
 		next = zap_pte_range(tlb, vma, pmd, addr, next,
-					zap_work, details, activate);
+						zap_work, details);
 	} while (pmd++, addr = next, (addr != end && *zap_work > 0));
 
 	return addr;
@@ -1091,8 +1088,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 static inline unsigned long zap_pud_range(struct mmu_gather *tlb,
 				struct vm_area_struct *vma, pgd_t *pgd,
 				unsigned long addr, unsigned long end,
-				long *zap_work, struct zap_details *details,
-				bool activate)
+				long *zap_work, struct zap_details *details)
 {
 	pud_t *pud;
 	unsigned long next;
@@ -1105,7 +1101,7 @@ static inline unsigned long zap_pud_range(struct mmu_gather *tlb,
 			continue;
 		}
 		next = zap_pmd_range(tlb, vma, pud, addr, next,
-					zap_work, details, activate);
+						zap_work, details);
 	} while (pud++, addr = next, (addr != end && *zap_work > 0));
 
 	return addr;
@@ -1114,8 +1110,7 @@ static inline unsigned long zap_pud_range(struct mmu_gather *tlb,
 static unsigned long unmap_page_range(struct mmu_gather *tlb,
 				struct vm_area_struct *vma,
 				unsigned long addr, unsigned long end,
-				long *zap_work, struct zap_details *details,
-				bool activate)
+				long *zap_work, struct zap_details *details)
 {
 	pgd_t *pgd;
 	unsigned long next;
@@ -1134,7 +1129,7 @@ static unsigned long unmap_page_range(struct mmu_gather *tlb,
 			continue;
 		}
 		next = zap_pud_range(tlb, vma, pgd, addr, next,
-						zap_work, details, activate);
+						zap_work, details);
 	} while (pgd++, addr = next, (addr != end && *zap_work > 0));
 	tlb_end_vma(tlb, vma);
 	mem_cgroup_uncharge_end();
@@ -1157,7 +1152,6 @@ static unsigned long unmap_page_range(struct mmu_gather *tlb,
  * @end_addr: virtual address at which to end unmapping
  * @nr_accounted: Place number of unmapped pages in vm-accountable vma's here
  * @details: details of nonlinear truncation or shared cache invalidation
- * @activate: whether pages included in the vma should be activated or not
  *
  * Returns the end address of the unmapping (restart addr if interrupted).
  *
@@ -1179,7 +1173,7 @@ static unsigned long unmap_page_range(struct mmu_gather *tlb,
 unsigned long unmap_vmas(struct mmu_gather *tlb,
 		struct vm_area_struct *vma, unsigned long start_addr,
 		unsigned long end_addr, unsigned long *nr_accounted,
-		struct zap_details *details, bool activate)
+		struct zap_details *details)
 {
 	long zap_work = ZAP_BLOCK_SIZE;
 	unsigned long start = start_addr;
@@ -1224,8 +1218,8 @@ unsigned long unmap_vmas(struct mmu_gather *tlb,
 
 				start = end;
 			} else
-				start = unmap_page_range(tlb, vma, start,
-					end, &zap_work, details, activate);
+				start = unmap_page_range(tlb, vma,
+						start, end, &zap_work, details);
 
 			if (zap_work > 0) {
 				BUG_ON(start != end);
@@ -1253,10 +1247,9 @@ out:
  * @address: starting address of pages to zap
  * @size: number of bytes to zap
  * @details: details of nonlinear truncation or shared cache invalidation
- * @activate: whether pages included in the vma should be activated or not
  */
 unsigned long zap_page_range(struct vm_area_struct *vma, unsigned long address,
-		unsigned long size, struct zap_details *details, bool activate)
+		unsigned long size, struct zap_details *details)
 {
 	struct mm_struct *mm = vma->vm_mm;
 	struct mmu_gather tlb;
@@ -1266,8 +1259,7 @@ unsigned long zap_page_range(struct vm_area_struct *vma, unsigned long address,
 	lru_add_drain();
 	tlb_gather_mmu(&tlb, mm, 0);
 	update_hiwater_rss(mm);
-	end = unmap_vmas(&tlb, vma, address, end, &nr_accounted,
-		details, activate);
+	end = unmap_vmas(&tlb, vma, address, end, &nr_accounted, details);
 	tlb_finish_mmu(&tlb, address, end);
 	return end;
 }
@@ -1290,7 +1282,7 @@ int zap_vma_ptes(struct vm_area_struct *vma, unsigned long address,
 	if (address < vma->vm_start || address + size > vma->vm_end ||
 	    		!(vma->vm_flags & VM_PFNMAP))
 		return -1;
-	zap_page_range(vma, address, size, NULL, false);
+	zap_page_range(vma, address, size, NULL);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(zap_vma_ptes);
@@ -2528,7 +2520,7 @@ again:
 	}
 
 	restart_addr = zap_page_range(vma, start_addr,
-			end_addr - start_addr, details, true);
+					end_addr - start_addr, details);
 	need_break = need_resched() || mutex_is_contended(details->i_mmap_lock);
 
 	if (restart_addr >= end_addr) {
