@@ -524,7 +524,9 @@ static int device_resume(struct device *dev, pm_message_t state, bool async)
 	TRACE_DEVICE(dev);
 	TRACE_RESUME(0);
 
-	dpm_wait(dev->parent, async);
+	if (dev->parent && (dev->parent->power.status >= DPM_OFF ||
+			    dev->parent->power.status == DPM_RESUMING))
+		dpm_wait(dev->parent, async);
 	device_lock(dev);
 
 	dev->power.status = DPM_RESUMING;
