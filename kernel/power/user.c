@@ -264,6 +264,7 @@ static long snapshot_ioctl(struct file *filp, unsigned int cmd,
 	case SNAPSHOT_UNFREEZE:
 		if (!data->frozen || data->ready)
 			break;
+		pm_restore_gfp_mask();
 		thaw_processes();
 		usermodehelper_enable();
 		data->frozen = 0;
@@ -276,6 +277,7 @@ static long snapshot_ioctl(struct file *filp, unsigned int cmd,
 			error = -EPERM;
 			break;
 		}
+		pm_restore_gfp_mask();
 		error = hibernation_snapshot(data->platform_support);
 		if (!error)
 			error = put_user(in_suspend, (int __user *)arg);
