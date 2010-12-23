@@ -199,7 +199,6 @@ struct rq {
 	u64 nohz_stamp;
 	unsigned char in_nohz_recently;
 #endif
-	struct task_struct *last_task;
 #endif
 
 	struct task_struct *curr, *idle;
@@ -789,19 +788,12 @@ static int suitable_idle_cpus(struct task_struct *p)
 
 static void resched_task(struct task_struct *p);
 
-/*
- * last_task stores the last non-idle task scheduled on the local rq for
- * cache warmth testing.
- */
-static inline void set_last_task(struct rq *rq, struct task_struct *p)
-{
-	rq->last_task = p;
-}
-
-#define CPUIDLE_CACHE_BUSY	(1)
-#define CPUIDLE_DIFF_CPU	(2)
-#define CPUIDLE_THREAD_BUSY	(4)
-#define CPUIDLE_DIFF_NODE	(8)
+#define CPUIDLE_DIFF_THREAD	(1)
+#define CPUIDLE_DIFF_CORE	(2)
+#define CPUIDLE_CACHE_BUSY	(4)
+#define CPUIDLE_DIFF_CPU	(8)
+#define CPUIDLE_THREAD_BUSY	(16)
+#define CPUIDLE_DIFF_NODE	(32)
 
 /*
  * The best idle CPU is chosen according to the CPUIDLE ranking above where the
@@ -854,27 +846,28 @@ static void resched_best_idle(struct task_struct *p)
 		}
 		tmp_rq = cpu_rq(cpu_tmp);
 
-		if (rq->cpu_locality[cpu_tmp]) {
-			/* Check rq->last_task hasn't been dereferenced */
-			if (rq->last_task && p != rq->last_task) {
 #ifdef CONFIG_NUMA
-				if (rq->cpu_locality[cpu_tmp] > 1)
-					ranking |= CPUIDLE_DIFF_NODE;
+		if (rq->cpu_locality[cpu_tmp] > 3)
+			ranking |= CPUIDLE_DIFF_NODE;
+		else
 #endif
-				ranking |= CPUIDLE_DIFF_CPU;
-			}
-		}
+		if (rq->cpu_locality[cpu_tmp] > 2)
+			ranking |= CPUIDLE_DIFF_CPU;
 #ifdef CONFIG_SCHED_MC
+		if (rq->cpu_locality[cpu_tmp] == 2)
+			ranking |= CPUIDLE_DIFF_CORE;
 		if (!(tmp_rq->cache_idle(cpu_tmp)))
 			ranking |= CPUIDLE_CACHE_BUSY;
 #endif
 #ifdef CONFIG_SCHED_SMT
+		if (rq->cpu_locality[cpu_tmp] == 1)
+			ranking |= CPUIDLE_DIFF_THREAD;
 		if (!(tmp_rq->siblings_idle(cpu_tmp)))
 			ranking |= CPUIDLE_THREAD_BUSY;
 #endif
 		if (ranking < best_ranking) {
 			best_cpu = cpu_tmp;
-			if (ranking <= 1)
+			if (ranking == 0)
 				break;
 			best_ranking = ranking;
 		}
@@ -891,11 +884,11 @@ static inline void resched_suitable_idle(struct task_struct *p)
 
 /*
  * The cpu cache locality difference between CPUs is used to determine how far
- * to offset the virtual deadline. "One" difference in locality means that one
+ * to offset the virtual deadline. <2 difference in locality means that one
  * timeslice difference is allowed longer for the cpu local tasks. This is
  * enough in the common case when tasks are up to 2* number of CPUs to keep
  * tasks within their shared cache CPUs only. CPUs on different nodes or not
- * even in this domain (NUMA) have "3" difference, allowing 4 times longer
+ * even in this domain (NUMA) have "4" difference, allowing 4 times longer
  * deadlines before being taken onto another cpu, allowing for 2* the double
  * seen by separate CPUs above.
  * Simple summary: Virtual deadlines are equal on shared cache CPUs, double
@@ -904,12 +897,11 @@ static inline void resched_suitable_idle(struct task_struct *p)
 static inline int
 cache_distance(struct rq *task_rq, struct rq *rq, struct task_struct *p)
 {
-	/* Check rq->last_task hasn't been dereferenced */
-	if (likely(rq->last_task)) {
-		if (rq->last_task == p)
-			return 0;
-	}
-	return rq->cpu_locality[cpu_of(task_rq)] * task_timeslice(p);
+	int locality = rq->cpu_locality[cpu_of(task_rq)] - 2;
+
+	if (locality > 0)
+		return task_timeslice(p) << locality;
+	return 0;
 }
 #else /* CONFIG_SMP */
 static inline void inc_qnr(void)
@@ -946,10 +938,6 @@ static inline int
 cache_distance(struct rq *task_rq, struct rq *rq, struct task_struct *p)
 {
 	return 0;
-}
-
-static inline void set_last_task(struct rq *rq, struct task_struct *p)
-{
 }
 #endif /* CONFIG_SMP */
 
@@ -1356,10 +1344,10 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 		return;
 	}
 
-	if (online_cpus(p))
+	if (likely(online_cpus(p)))
 		cpus_and(tmp, cpu_online_map, p->cpus_allowed);
 	else
-		(cpumask_copy(&tmp, &cpu_online_map));
+		return;
 
 	latest_deadline = 0;
 	highest_prio = -1;
@@ -1523,7 +1511,7 @@ static void try_to_wake_up_local(struct task_struct *p)
 	struct rq *rq = task_rq(p);
 	bool success = false;
 
-	BUG_ON(rq != this_rq());
+	WARN_ON(rq != this_rq());
 	BUG_ON(p == current);
 	lockdep_assert_held(&grq.lock);
 
@@ -2811,6 +2799,7 @@ need_resched_nonpreemptible:
 		if (unlikely(signal_pending_state(prev->state, prev))) {
 			prev->state = TASK_RUNNING;
 		} else {
+			deactivate = 1;
 			/*
 			 * If a worker is going to sleep, notify and
 			 * ask workqueue whether it wants to wake up a
@@ -2821,10 +2810,14 @@ need_resched_nonpreemptible:
 				struct task_struct *to_wakeup;
 
 				to_wakeup = wq_worker_sleeping(prev, cpu);
-				if (to_wakeup)
-					try_to_wake_up_local(to_wakeup);
+				if (to_wakeup) {
+					/* This shouldn't happen, but does */
+					if (unlikely(to_wakeup == prev))
+						deactivate = 0;
+					else
+						try_to_wake_up_local(to_wakeup);
+				}
 			}
-			deactivate = 1;
 		}
 		switch_count = &prev->nvcsw;
 	}
@@ -2837,7 +2830,7 @@ need_resched_nonpreemptible:
 		prev->last_ran = rq->clock;
 
 		/* Task changed affinity off this CPU */
-		if (needs_other_cpu(prev, cpu))
+		if (unlikely(!cpu_isset(cpu, prev->cpus_allowed)))
 			resched_suitable_idle(prev);
 		else if (!deactivate) {
 			if (!queued_notrunning()) {
@@ -2880,8 +2873,6 @@ need_resched_nonpreemptible:
 		sched_info_switch(prev, next);
 		perf_event_task_sched_out(prev, next);
 
-		if (prev != idle)
-			set_last_task(rq, prev);
 		set_rq_task(rq, next);
 		grq.nr_switches++;
 		prev->oncpu = 0;
@@ -6637,10 +6628,12 @@ void __init sched_init_smp(void)
 					cpumask_set_cpu(other_cpu, &rq->cache_siblings);
 			}
 #endif
-			if (sd->level <= SD_LV_MC)
-				locality = 0;
-			else if (sd->level <= SD_LV_NODE)
+			if (sd->level <= SD_LV_SIBLING)
 				locality = 1;
+			else if (sd->level <= SD_LV_MC)
+				locality = 2;
+			else if (sd->level <= SD_LV_NODE)
+				locality = 3;
 			else
 				continue;
 
@@ -6746,7 +6739,7 @@ void __init sched_init(void)
 			if (i == j)
 				rq->cpu_locality[j] = 0;
 			else
-				rq->cpu_locality[j] = 3;
+				rq->cpu_locality[j] = 4;
 		}
 	}
 #endif
