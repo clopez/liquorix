@@ -587,7 +587,6 @@ int main(int ac, char **av)
 			printf(message);
 			free(message);
 			printf("\nPress any key to continue!");
-			proceed = get_character();
 			printf("\n\n");
 		}
 	}
