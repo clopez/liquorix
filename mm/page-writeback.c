@@ -1209,7 +1209,8 @@ int set_page_dirty(struct page *page)
 	 * it will confuse readahead and  make it restart the size rampup
 	 * process. But it's a trivial problem.
 	 */
-	ClearPageReclaim(page);
+	if (!PageCompound(page))
+		ClearPageReclaim(page);
 	if (likely(mapping)) {
 		int (*spd)(struct page *) = mapping->a_ops->set_page_dirty;
 #ifdef CONFIG_BLOCK
