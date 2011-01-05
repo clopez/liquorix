@@ -123,7 +123,7 @@
 #define NS_TO_MS(TIME)		((TIME) >> 20)
 #define NS_TO_US(TIME)		((TIME) >> 10)
 
-#define RESCHED_US	(100) /* Reschedule if less than this many us left */
+#define RESCHED_US	(100) /* Reschedule if less than this many μs left */
 
 /*
  * This is the time all tasks within the same priority round robin.
@@ -1335,7 +1335,7 @@ static inline int online_cpus(struct task_struct *p)
  */
 static inline int needs_other_cpu(struct task_struct *p, int cpu)
 {
-	if (unlikely(!cpu_isset(cpu, p->cpus_allowed) && online_cpus(p)))
+	if (unlikely(!cpu_isset(cpu, p->cpus_allowed)))
 		return 1;
 	return 0;
 }
@@ -1352,14 +1352,14 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 	int highest_prio;
 	cpumask_t tmp;
 
-	/* IDLEPRIO tasks never preempt anything */
-	if (p->policy == SCHED_IDLEPRIO)
-		return;
-
 	if (suitable_idle_cpus(p)) {
 		resched_best_idle(p);
 		return;
 	}
+
+	/* IDLEPRIO tasks never preempt anything */
+	if (p->policy == SCHED_IDLEPRIO)
+		return;
 
 	if (likely(online_cpus(p)))
 		cpus_and(tmp, cpu_online_map, p->cpus_allowed);
@@ -1878,14 +1878,14 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	 */
 	arch_start_context_switch(prev);
 
-	if (likely(!mm)) {
+	if (!mm) {
 		next->active_mm = oldmm;
 		atomic_inc(&oldmm->mm_count);
 		enter_lazy_tlb(oldmm, next);
 	} else
 		switch_mm(oldmm, mm, next);
 
-	if (likely(!prev->mm)) {
+	if (!prev->mm) {
 		prev->active_mm = NULL;
 		rq->prev_mm = oldmm;
 	}
@@ -2071,9 +2071,13 @@ pc_system_time(struct rq *rq, struct task_struct *p, int hardirq_offset,
 	}
 	p->sched_time += ns;
 
-	if (hardirq_count() - hardirq_offset)
+	if (hardirq_count() - hardirq_offset) {
 		rq->irq_pc += pc;
-	else if (softirq_count()) {
+		if (rq->irq_pc >= 100) {
+			rq->irq_pc %= 100;
+			cpustat->irq = cputime64_add(cpustat->irq, tmp);
+		}
+	} else if (softirq_count()) {
 		rq->softirq_pc += pc;
 		if (rq->softirq_pc >= 100) {
 			rq->softirq_pc %= 100;
@@ -2463,7 +2467,7 @@ static void task_running_tick(struct rq *rq)
 	 * Tasks that were scheduled in the first half of a tick are not
 	 * allowed to run into the 2nd half of the next tick if they will
 	 * run out of time slice in the interim. Otherwise, if they have
-	 * less than 100us of time slice left they will be rescheduled.
+	 * less than RESCHED_US μs of time slice left they will be rescheduled.
 	 */
 	if (rq->dither) {
 		if (rq->rq_time_slice > HALF_JIFFY_US)
@@ -2847,7 +2851,7 @@ need_resched_nonpreemptible:
 		prev->last_ran = rq->clock;
 
 		/* Task changed affinity off this CPU */
-		if (unlikely(!cpu_isset(cpu, prev->cpus_allowed)))
+		if (needs_other_cpu(prev, cpu))
 			resched_suitable_idle(prev);
 		else if (!deactivate) {
 			if (!queued_notrunning()) {
@@ -3742,8 +3746,8 @@ recheck:
 	 * SCHED_BATCH is 0.
 	 */
 	if (param->sched_priority < 0 ||
-	    (p->mm && param->sched_priority > MAX_USER_RT_PRIO-1) ||
-	    (!p->mm && param->sched_priority > MAX_RT_PRIO-1))
+	    (p->mm && param->sched_priority > MAX_USER_RT_PRIO - 1) ||
+	    (!p->mm && param->sched_priority > MAX_RT_PRIO - 1))
 		return -EINVAL;
 	if (is_rt_policy(policy) != (param->sched_priority != 0))
 		return -EINVAL;
@@ -4475,7 +4479,10 @@ void init_idle(struct task_struct *idle, int cpu)
 	idle->prio = PRIO_LIMIT;
 	set_rq_task(rq, idle);
 	idle->cpus_allowed = cpumask_of_cpu(cpu);
+	/* Silence PROVE_RCU */
+	rcu_read_lock();
 	set_task_cpu(idle, cpu);
+	rcu_read_unlock();
 	rq->curr = rq->idle = idle;
 	idle->oncpu = 1;
 	set_cpuidle_map(cpu);
@@ -4695,6 +4702,29 @@ void move_task_off_dead_cpu(int dead_cpu, struct task_struct *p)
 
 }
 
+/* Run through task list and find tasks affined to just the dead cpu, then
+ * allocate a new affinity */
+static void break_sole_affinity(int src_cpu)
+{
+	struct task_struct *p, *t;
+
+	do_each_thread(t, p) {
+		if (!online_cpus(p)) {
+			cpumask_copy(&p->cpus_allowed, cpu_possible_mask);
+			/*
+			 * Don't tell them about moving exiting tasks or
+			 * kernel threads (both mm NULL), since they never
+			 * leave kernel.
+			 */
+			if (p->mm && printk_ratelimit()) {
+				printk(KERN_INFO "process %d (%s) no "
+				       "longer affine to cpu %d\n",
+				       task_pid_nr(p), p->comm, src_cpu);
+			}
+		}
+	} while_each_thread(t, p);
+}
+
 /*
  * Schedules idle task to be the next runnable task on current CPU.
  * It does so by boosting its priority to highest possible.
@@ -4715,6 +4745,7 @@ void sched_idle_next(void)
 	 * and interrupts disabled on the current cpu.
 	 */
 	grq_lock_irqsave(&flags);
+	break_sole_affinity(this_cpu);
 
 	__setscheduler(idle, rq, SCHED_FIFO, MAX_RT_PRIO - 1);
 
