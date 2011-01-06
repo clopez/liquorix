@@ -18,7 +18,6 @@
  * if wakeup events are registered during or immediately before the transition.
  */
 bool events_check_enabled;
-EXPORT_SYMBOL_GPL(events_check_enabled);
 
 /* The counter of registered wakeup events. */
 static unsigned long event_count;
@@ -223,7 +222,6 @@ bool pm_get_wakeup_count(unsigned long *count)
 	spin_unlock_irq(&events_lock);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(pm_check_wakeup_events);
 
 /**
  * pm_save_wakeup_count - Save the current number of registered wakeup events.

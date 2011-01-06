@@ -35,8 +35,6 @@
 #include <asm/io.h>
 
 #include "power.h"
-#include "tuxonice_builtin.h"
-#include "tuxonice_pagedir.h"
 
 static int swsusp_page_is_free(struct page *);
 static void swsusp_set_page_forbidden(struct page *);
@@ -56,10 +54,6 @@ unsigned long image_size = 500 * 1024 * 1024;
  * directly to their "original" page frames.
  */
 struct pbe *restore_pblist;
-EXPORT_SYMBOL_GPL(restore_pblist);
-
-int resume_attempted;
-EXPORT_SYMBOL_GPL(resume_attempted);
 
 /* Pointer to an auxiliary buffer (1 page) */
 static void *buffer;
@@ -102,9 +96,6 @@ static void *get_image_page(gfp_t gfp_mask, int safe_needed)
 
 unsigned long get_safe_page(gfp_t gfp_mask)
 {
-	if (toi_running)
-		return toi_get_nonconflicting_page();
-
 	return (unsigned long)get_image_page(gfp_mask, PG_SAFE);
 }
 
@@ -241,53 +232,47 @@ static void *chain_alloc(struct chain_allocator *ca, unsigned int size)
  *	the represented memory area.
  */
 
+#define BM_END_OF_MAP	(~0UL)
+
+#define BM_BITS_PER_BLOCK	(PAGE_SIZE * BITS_PER_BYTE)
+
+struct bm_block {
+	struct list_head hook;	/* hook into a list of bitmap blocks */
+	unsigned long start_pfn;	/* pfn represented by the first bit */
+	unsigned long end_pfn;	/* pfn represented by the last bit plus 1 */
+	unsigned long *data;	/* bitmap representing pages */
+};
+
 static inline unsigned long bm_block_bits(struct bm_block *bb)
 {
 	return bb->end_pfn - bb->start_pfn;
 }
 
+/* strcut bm_position is used for browsing memory bitmaps */
+
+struct bm_position {
+	struct bm_block *block;
+	int bit;
+};
+
+struct memory_bitmap {
+	struct list_head blocks;	/* list of bitmap blocks */
+	struct linked_page *p_list;	/* list of pages used to store zone
+					 * bitmap objects and bitmap block
+					 * objects
+					 */
+	struct bm_position cur;	/* most recently used bit position */
+};
+
 /* Functions that operate on memory bitmaps */
 
-void memory_bm_position_reset_index(struct memory_bitmap *bm, int index)
+static void memory_bm_position_reset(struct memory_bitmap *bm)
 {
-	bm->states[index].block = list_entry(bm->blocks.next,
-				struct bm_block, hook);
-	bm->states[index].bit = 0;
+	bm->cur.block = list_entry(bm->blocks.next, struct bm_block, hook);
+	bm->cur.bit = 0;
 }
-EXPORT_SYMBOL_GPL(memory_bm_position_reset_index);
 
-void memory_bm_position_reset(struct memory_bitmap *bm)
-{
-	int i;
-
-	for (i = 0; i < bm->num_states; i++) {
-		bm->states[i].block = list_entry(bm->blocks.next,
-				struct bm_block, hook);
-		bm->states[i].bit = 0;
-	}
-}
-EXPORT_SYMBOL_GPL(memory_bm_position_reset);
-
-int memory_bm_set_iterators(struct memory_bitmap *bm, int number)
-{
-	int bytes = number * sizeof(struct bm_position);
-	struct bm_position *new_states;
-
-	if (number < bm->num_states)
-		return 0;
-
-	new_states = kmalloc(bytes, GFP_KERNEL);
-	if (!new_states)
-		return -ENOMEM;
-
-	if (bm->states)
-		kfree(bm->states);
-
-	bm->states = new_states;
-	bm->num_states = number;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(memory_bm_set_iterators);
+static void memory_bm_free(struct memory_bitmap *bm, int clear_nosave_free);
 
 /**
  *	create_bm_block_list - create a list of block bitmap objects
@@ -395,8 +380,8 @@ static int create_mem_extents(struct list_head *list, gfp_t gfp_mask)
 /**
   *	memory_bm_create - allocate memory for a memory bitmap
   */
-int memory_bm_create_index(struct memory_bitmap *bm, gfp_t gfp_mask,
-		int safe_needed, int states)
+static int
+memory_bm_create(struct memory_bitmap *bm, gfp_t gfp_mask, int safe_needed)
 {
 	struct chain_allocator ca;
 	struct list_head mem_extents;
@@ -440,9 +425,6 @@ int memory_bm_create_index(struct memory_bitmap *bm, gfp_t gfp_mask,
 		}
 	}
 
-	if (!error)
-		error = memory_bm_set_iterators(bm, states);
-
 	bm->p_list = ca.chain;
 	memory_bm_position_reset(bm);
  Exit:
@@ -454,18 +436,11 @@ int memory_bm_create_index(struct memory_bitmap *bm, gfp_t gfp_mask,
 	memory_bm_free(bm, PG_UNSAFE_CLEAR);
 	goto Exit;
 }
-EXPORT_SYMBOL_GPL(memory_bm_create_index);
-
-int memory_bm_create(struct memory_bitmap *bm, gfp_t gfp_mask, int safe_needed)
-{
-	return memory_bm_create_index(bm, gfp_mask, safe_needed, 1);
-}
-EXPORT_SYMBOL_GPL(memory_bm_create);
 
 /**
   *	memory_bm_free - free memory occupied by the memory bitmap @bm
   */
-void memory_bm_free(struct memory_bitmap *bm, int clear_nosave_free)
+static void memory_bm_free(struct memory_bitmap *bm, int clear_nosave_free)
 {
 	struct bm_block *bb;
 
@@ -476,22 +451,15 @@ void memory_bm_free(struct memory_bitmap *bm, int clear_nosave_free)
 	free_list_of_pages(bm->p_list, clear_nosave_free);
 
 	INIT_LIST_HEAD(&bm->blocks);
-
-	if (bm->states) {
-		kfree(bm->states);
-		bm->states = NULL;
-		bm->num_states = 0;
-	}
 }
-EXPORT_SYMBOL_GPL(memory_bm_free);
 
 /**
  *	memory_bm_find_bit - find the bit in the bitmap @bm that corresponds
  *	to given pfn.  The cur_zone_bm member of @bm and the cur_block member
- *	of @bm->states[i]_zone_bm are updated.
+ *	of @bm->cur_zone_bm are updated.
  */
-static int memory_bm_find_bit_index(struct memory_bitmap *bm, unsigned long pfn,
-				void **addr, unsigned int *bit_nr, int state)
+static int memory_bm_find_bit(struct memory_bitmap *bm, unsigned long pfn,
+				void **addr, unsigned int *bit_nr)
 {
 	struct bm_block *bb;
 
@@ -499,7 +467,7 @@ static int memory_bm_find_bit_index(struct memory_bitmap *bm, unsigned long pfn,
 	 * Check if the pfn corresponds to the current bitmap block and find
 	 * the block where it fits if this is not the case.
 	 */
-	bb = bm->states[state].block;
+	bb = bm->cur.block;
 	if (pfn < bb->start_pfn)
 		list_for_each_entry_continue_reverse(bb, &bm->blocks, hook)
 			if (pfn >= bb->start_pfn)
@@ -514,21 +482,15 @@ static int memory_bm_find_bit_index(struct memory_bitmap *bm, unsigned long pfn,
 		return -EFAULT;
 
 	/* The block has been found */
-	bm->states[state].block = bb;
+	bm->cur.block = bb;
 	pfn -= bb->start_pfn;
-	bm->states[state].bit = pfn + 1;
+	bm->cur.bit = pfn + 1;
 	*bit_nr = pfn;
 	*addr = bb->data;
 	return 0;
 }
 
-static int memory_bm_find_bit(struct memory_bitmap *bm, unsigned long pfn,
-				void **addr, unsigned int *bit_nr)
-{
-	return memory_bm_find_bit_index(bm, pfn, addr, bit_nr, 0);
-}
-
-void memory_bm_set_bit(struct memory_bitmap *bm, unsigned long pfn)
+static void memory_bm_set_bit(struct memory_bitmap *bm, unsigned long pfn)
 {
 	void *addr;
 	unsigned int bit;
@@ -538,7 +500,6 @@ void memory_bm_set_bit(struct memory_bitmap *bm, unsigned long pfn)
 	BUG_ON(error);
 	set_bit(bit, addr);
 }
-EXPORT_SYMBOL_GPL(memory_bm_set_bit);
 
 static int mem_bm_set_bit_check(struct memory_bitmap *bm, unsigned long pfn)
 {
@@ -552,43 +513,27 @@ static int mem_bm_set_bit_check(struct memory_bitmap *bm, unsigned long pfn)
 	return error;
 }
 
-void memory_bm_clear_bit_index(struct memory_bitmap *bm, unsigned long pfn,
-		int index)
+static void memory_bm_clear_bit(struct memory_bitmap *bm, unsigned long pfn)
 {
 	void *addr;
 	unsigned int bit;
 	int error;
 
-	error = memory_bm_find_bit_index(bm, pfn, &addr, &bit, index);
+	error = memory_bm_find_bit(bm, pfn, &addr, &bit);
 	BUG_ON(error);
 	clear_bit(bit, addr);
 }
-EXPORT_SYMBOL_GPL(memory_bm_clear_bit_index);
 
-void memory_bm_clear_bit(struct memory_bitmap *bm, unsigned long pfn)
-{
-	memory_bm_clear_bit_index(bm, pfn, 0);
-}
-EXPORT_SYMBOL_GPL(memory_bm_clear_bit);
-
-int memory_bm_test_bit_index(struct memory_bitmap *bm, unsigned long pfn,
-		int index)
+static int memory_bm_test_bit(struct memory_bitmap *bm, unsigned long pfn)
 {
 	void *addr;
 	unsigned int bit;
 	int error;
 
-	error = memory_bm_find_bit_index(bm, pfn, &addr, &bit, index);
+	error = memory_bm_find_bit(bm, pfn, &addr, &bit);
 	BUG_ON(error);
 	return test_bit(bit, addr);
 }
-EXPORT_SYMBOL_GPL(memory_bm_test_bit_index);
-
-int memory_bm_test_bit(struct memory_bitmap *bm, unsigned long pfn)
-{
-	return memory_bm_test_bit_index(bm, pfn, 0);
-}
-EXPORT_SYMBOL_GPL(memory_bm_test_bit);
 
 static bool memory_bm_pfn_present(struct memory_bitmap *bm, unsigned long pfn)
 {
@@ -607,184 +552,43 @@ static bool memory_bm_pfn_present(struct memory_bitmap *bm, unsigned long pfn)
  *	this function.
  */
 
-unsigned long memory_bm_next_pfn_index(struct memory_bitmap *bm, int index)
+static unsigned long memory_bm_next_pfn(struct memory_bitmap *bm)
 {
 	struct bm_block *bb;
 	int bit;
 
-	bb = bm->states[index].block;
+	bb = bm->cur.block;
 	do {
-		bit = bm->states[index].bit;
+		bit = bm->cur.bit;
 		bit = find_next_bit(bb->data, bm_block_bits(bb), bit);
 		if (bit < bm_block_bits(bb))
 			goto Return_pfn;
 
 		bb = list_entry(bb->hook.next, struct bm_block, hook);
-		bm->states[index].block = bb;
-		bm->states[index].bit = 0;
+		bm->cur.block = bb;
+		bm->cur.bit = 0;
 	} while (&bb->hook != &bm->blocks);
 
-	memory_bm_position_reset_index(bm, index);
+	memory_bm_position_reset(bm);
 	return BM_END_OF_MAP;
 
  Return_pfn:
-	bm->states[index].bit = bit + 1;
+	bm->cur.bit = bit + 1;
 	return bb->start_pfn + bit;
 }
-EXPORT_SYMBOL_GPL(memory_bm_next_pfn_index);
 
-unsigned long memory_bm_next_pfn(struct memory_bitmap *bm)
-{
-	return memory_bm_next_pfn_index(bm, 0);
-}
-EXPORT_SYMBOL_GPL(memory_bm_next_pfn);
+/**
+ *	This structure represents a range of page frames the contents of which
+ *	should not be saved during the suspend.
+ */
 
-void memory_bm_clear(struct memory_bitmap *bm)
-{
-	unsigned long pfn;
+struct nosave_region {
+	struct list_head list;
+	unsigned long start_pfn;
+	unsigned long end_pfn;
+};
 
-	memory_bm_position_reset(bm);
-	pfn = memory_bm_next_pfn(bm);
-	while (pfn != BM_END_OF_MAP) {
-		memory_bm_clear_bit(bm, pfn);
-		pfn = memory_bm_next_pfn(bm);
-	}
-}
-EXPORT_SYMBOL_GPL(memory_bm_clear);
-
-void memory_bm_copy(struct memory_bitmap *source, struct memory_bitmap *dest)
-{
-	unsigned long pfn;
-
-	memory_bm_position_reset(source);
-	pfn = memory_bm_next_pfn(source);
-	while (pfn != BM_END_OF_MAP) {
-		memory_bm_set_bit(dest, pfn);
-		pfn = memory_bm_next_pfn(source);
-	}
-}
-EXPORT_SYMBOL_GPL(memory_bm_copy);
-
-void memory_bm_dup(struct memory_bitmap *source, struct memory_bitmap *dest)
-{
-	memory_bm_clear(dest);
-	memory_bm_copy(source, dest);
-}
-EXPORT_SYMBOL_GPL(memory_bm_dup);
-
-#ifdef CONFIG_TOI
-#define DEFINE_MEMORY_BITMAP(name) \
-struct memory_bitmap *name; \
-EXPORT_SYMBOL_GPL(name)
-
-DEFINE_MEMORY_BITMAP(pageset1_map);
-DEFINE_MEMORY_BITMAP(pageset1_copy_map);
-DEFINE_MEMORY_BITMAP(pageset2_map);
-DEFINE_MEMORY_BITMAP(page_resave_map);
-DEFINE_MEMORY_BITMAP(io_map);
-DEFINE_MEMORY_BITMAP(nosave_map);
-DEFINE_MEMORY_BITMAP(free_map);
-
-int memory_bm_write(struct memory_bitmap *bm, int (*rw_chunk)
-	(int rw, struct toi_module_ops *owner, char *buffer, int buffer_size))
-{
-	int result = 0;
-	unsigned int nr = 0;
-	struct bm_block *bb;
-
-	if (!bm)
-		return result;
-
-	list_for_each_entry(bb, &bm->blocks, hook)
-		nr++;
-
-	result = (*rw_chunk)(WRITE, NULL, (char *) &nr, sizeof(unsigned int));
-	if (result)
-		return result;
-
-	list_for_each_entry(bb, &bm->blocks, hook) {
-		result = (*rw_chunk)(WRITE, NULL, (char *) &bb->start_pfn,
-				2 * sizeof(unsigned long));
-		if (result)
-			return result;
-
-		result = (*rw_chunk)(WRITE, NULL, (char *) bb->data, PAGE_SIZE);
-		if (result)
-			return result;
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(memory_bm_write);
-
-int memory_bm_read(struct memory_bitmap *bm, int (*rw_chunk)
-	(int rw, struct toi_module_ops *owner, char *buffer, int buffer_size))
-{
-	int result = 0;
-	unsigned int nr, i;
-	struct bm_block *bb;
-
-	if (!bm)
-		return result;
-
-	result = memory_bm_create(bm, GFP_KERNEL, 0);
-
-	if (result)
-		return result;
-
-	result = (*rw_chunk)(READ, NULL, (char *) &nr, sizeof(unsigned int));
-	if (result)
-		goto Free;
-
-	for (i = 0; i < nr; i++) {
-		unsigned long pfn;
-
-		result = (*rw_chunk)(READ, NULL, (char *) &pfn,
-				sizeof(unsigned long));
-		if (result)
-			goto Free;
-
-		list_for_each_entry(bb, &bm->blocks, hook)
-			if (bb->start_pfn == pfn)
-				break;
-
-		if (&bb->hook == &bm->blocks) {
-			printk(KERN_ERR
-				"TuxOnIce: Failed to load memory bitmap.\n");
-			result = -EINVAL;
-			goto Free;
-		}
-
-		result = (*rw_chunk)(READ, NULL, (char *) &pfn,
-				sizeof(unsigned long));
-		if (result)
-			goto Free;
-
-		if (pfn != bb->end_pfn) {
-			printk(KERN_ERR
-				"TuxOnIce: Failed to load memory bitmap. "
-				"End PFN doesn't match what was saved.\n");
-			result = -EINVAL;
-			goto Free;
-		}
-
-		result = (*rw_chunk)(READ, NULL, (char *) bb->data, PAGE_SIZE);
-
-		if (result)
-			goto Free;
-	}
-
-	return 0;
-
-Free:
-	memory_bm_free(bm, PG_ANY);
-	return result;
-}
-EXPORT_SYMBOL_GPL(memory_bm_read);
-#endif
-
-LIST_HEAD(nosave_regions);
-EXPORT_SYMBOL_GPL(nosave_regions);
+static LIST_HEAD(nosave_regions);
 
 /**
  *	register_nosave_region - register a range of page frames the contents
@@ -1020,7 +824,7 @@ static unsigned int count_free_highmem_pages(void)
  *	We should save the page if it isn't Nosave or NosaveFree, or Reserved,
  *	and it isn't a part of a free chunk of pages.
  */
-struct page *saveable_highmem_page(struct zone *zone, unsigned long pfn)
+static struct page *saveable_highmem_page(struct zone *zone, unsigned long pfn)
 {
 	struct page *page;
 
@@ -1039,7 +843,6 @@ struct page *saveable_highmem_page(struct zone *zone, unsigned long pfn)
 
 	return page;
 }
-EXPORT_SYMBOL_GPL(saveable_highmem_page);
 
 /**
  *	count_highmem_pages - compute the total number of saveable highmem
@@ -1065,6 +868,11 @@ static unsigned int count_highmem_pages(void)
 	}
 	return n;
 }
+#else
+static inline void *saveable_highmem_page(struct zone *z, unsigned long p)
+{
+	return NULL;
+}
 #endif /* CONFIG_HIGHMEM */
 
 /**
@@ -1075,7 +883,7 @@ static unsigned int count_highmem_pages(void)
  *	of pages statically defined as 'unsaveable', and it isn't a part of
  *	a free chunk of pages.
  */
-struct page *saveable_page(struct zone *zone, unsigned long pfn)
+static struct page *saveable_page(struct zone *zone, unsigned long pfn)
 {
 	struct page *page;
 
@@ -1097,7 +905,6 @@ struct page *saveable_page(struct zone *zone, unsigned long pfn)
 
 	return page;
 }
-EXPORT_SYMBOL_GPL(saveable_page);
 
 /**
  *	count_data_pages - compute the total number of saveable non-highmem
@@ -1739,9 +1546,6 @@ asmlinkage int swsusp_save(void)
 {
 	unsigned int nr_pages, nr_highmem;
 
-	if (toi_running)
-		return toi_post_context_save();
-
 	printk(KERN_INFO "PM: Creating hibernation image:\n");
 
 	drain_local_pages(NULL);
@@ -1782,14 +1586,14 @@ asmlinkage int swsusp_save(void)
 }
 
 #ifndef CONFIG_ARCH_HIBERNATION_HEADER
-int init_header_complete(struct swsusp_info *info)
+static int init_header_complete(struct swsusp_info *info)
 {
 	memcpy(&info->uts, init_utsname(), sizeof(struct new_utsname));
 	info->version_code = LINUX_VERSION_CODE;
 	return 0;
 }
 
-char *check_image_kernel(struct swsusp_info *info)
+static char *check_image_kernel(struct swsusp_info *info)
 {
 	if (info->version_code != LINUX_VERSION_CODE)
 		return "kernel version";
@@ -1803,7 +1607,6 @@ char *check_image_kernel(struct swsusp_info *info)
 		return "machine";
 	return NULL;
 }
-EXPORT_SYMBOL_GPL(check_image_kernel);
 #endif /* CONFIG_ARCH_HIBERNATION_HEADER */
 
 unsigned long snapshot_get_image_size(void)
@@ -1811,7 +1614,7 @@ unsigned long snapshot_get_image_size(void)
 	return nr_copy_pages + nr_meta_pages + 1;
 }
 
-int init_header(struct swsusp_info *info)
+static int init_header(struct swsusp_info *info)
 {
 	memset(info, 0, sizeof(struct swsusp_info));
 	info->num_physpages = num_physpages;
@@ -1821,7 +1624,6 @@ int init_header(struct swsusp_info *info)
 	info->size <<= PAGE_SHIFT;
 	return init_header_complete(info);
 }
-EXPORT_SYMBOL_GPL(init_header);
 
 /**
  *	pack_pfns - pfns corresponding to the set bits found in the bitmap @bm

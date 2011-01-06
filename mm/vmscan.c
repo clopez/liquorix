@@ -2576,9 +2576,6 @@ void wakeup_kswapd(struct zone *zone, int order)
 	if (!populated_zone(zone))
 		return;
 
-	if (freezer_is_on())
-		return;
-
 	if (!cpuset_zone_allowed_hardwall(zone, GFP_KERNEL))
 		return;
 	pgdat = zone->zone_pgdat;
@@ -2639,11 +2636,11 @@ unsigned long zone_reclaimable_pages(struct zone *zone)
  * LRU order by reclaiming preferentially
  * inactive > active > active referenced > active mapped
  */
-unsigned long shrink_memory_mask(unsigned long nr_to_reclaim, gfp_t mask)
+unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
 {
 	struct reclaim_state reclaim_state;
 	struct scan_control sc = {
-		.gfp_mask = mask,
+		.gfp_mask = GFP_HIGHUSER_MOVABLE,
 		.may_swap = 1,
 		.may_unmap = 1,
 		.may_writepage = 1,
@@ -2669,13 +2666,6 @@ unsigned long shrink_memory_mask(unsigned long nr_to_reclaim, gfp_t mask)
 
 	return nr_reclaimed;
 }
-EXPORT_SYMBOL_GPL(shrink_memory_mask);
-
-unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
-{
-	return shrink_memory_mask(nr_to_reclaim, GFP_HIGHUSER_MOVABLE);
-}
-EXPORT_SYMBOL_GPL(shrink_all_memory);
 #endif /* CONFIG_HIBERNATION */
 
 /* It's optimal to keep kswapds on the same CPUs as their memory, but
