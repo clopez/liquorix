@@ -7,13 +7,11 @@
 */
 
 #include "fuse_i.h"
-#include "fuse.h"
 
 #include <linux/pagemap.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
-#include <linux/freezer.h>
 #include <linux/module.h>
 
 static const struct file_operations fuse_direct_io_file_operations;
@@ -110,8 +108,6 @@ int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 	struct fuse_file *ff;
 	int err;
 	int opcode = isdir ? FUSE_OPENDIR : FUSE_OPEN;
-
-	FUSE_MIGHT_FREEZE(file->f_path.dentry->d_inode->i_sb, "fuse_send_open");
 
 	ff = fuse_file_alloc(fc);
 	if (!ff)
@@ -330,8 +326,6 @@ static int fuse_flush(struct file *file, fl_owner_t id)
 	if (fc->no_flush)
 		return 0;
 
-	FUSE_MIGHT_FREEZE(inode->i_sb, "fuse_flush");
-
 	req = fuse_get_req_nofail(fc, file);
 	memset(&inarg, 0, sizeof(inarg));
 	inarg.fh = ff->fh;
@@ -381,8 +375,6 @@ int fuse_fsync_common(struct file *file, int datasync, int isdir)
 
 	if ((!isdir && fc->no_fsync) || (isdir && fc->no_fsyncdir))
 		return 0;
-
-	FUSE_MIGHT_FREEZE(inode->i_sb, "fuse_fsync_common");
 
 	/*
 	 * Start writeback against all dirty pages of the inode, then
@@ -490,8 +482,6 @@ static int fuse_readpage(struct file *file, struct page *page)
 	err = -EIO;
 	if (is_bad_inode(inode))
 		goto out;
-
-	FUSE_MIGHT_FREEZE(file->f_mapping->host->i_sb, "fuse_readpage");
 
 	/*
 	 * Page writeback can extend beyond the liftime of the
@@ -606,9 +596,6 @@ static int fuse_readpages_fill(void *_data, struct page *page)
 	struct inode *inode = data->inode;
 	struct fuse_conn *fc = get_fuse_conn(inode);
 
-	FUSE_MIGHT_FREEZE(data->file->f_mapping->host->i_sb,
-			"fuse_readpages_fill");
-
 	fuse_wait_on_page_writeback(inode, page->index);
 
 	if (req->num_pages &&
@@ -639,8 +626,6 @@ static int fuse_readpages(struct file *file, struct address_space *mapping,
 	err = -EIO;
 	if (is_bad_inode(inode))
 		goto out;
-
-	FUSE_MIGHT_FREEZE(inode->i_sb, "fuse_readpages");
 
 	data.file = file;
 	data.inode = inode;
@@ -754,8 +739,6 @@ static int fuse_buffered_write(struct file *file, struct inode *inode,
 
 	if (is_bad_inode(inode))
 		return -EIO;
-
-	FUSE_MIGHT_FREEZE(inode->i_sb, "fuse_buffered_write");
 
 	/*
 	 * Make sure writepages on the same page are not mixed up with
@@ -916,8 +899,6 @@ static ssize_t fuse_perform_write(struct file *file,
 		struct fuse_req *req;
 		ssize_t count;
 
-		FUSE_MIGHT_FREEZE(inode->i_sb, "fuse_perform_write");
-
 		req = fuse_get_req(fc);
 		if (IS_ERR(req)) {
 			err = PTR_ERR(req);
@@ -1061,8 +1042,6 @@ ssize_t fuse_direct_io(struct file *file, const char __user *buf,
 	loff_t pos = *ppos;
 	ssize_t res = 0;
 	struct fuse_req *req;
-
-	FUSE_MIGHT_FREEZE(file->f_mapping->host->i_sb, "fuse_direct_io");
 
 	req = fuse_get_req(fc);
 	if (IS_ERR(req))
@@ -1451,8 +1430,6 @@ static int fuse_getlk(struct file *file, struct file_lock *fl)
 	struct fuse_lk_out outarg;
 	int err;
 
-	FUSE_MIGHT_FREEZE(file->f_mapping->host->i_sb, "fuse_getlk");
-
 	req = fuse_get_req(fc);
 	if (IS_ERR(req))
 		return PTR_ERR(req);
@@ -1487,8 +1464,6 @@ static int fuse_setlk(struct file *file, struct file_lock *fl, int flock)
 	/* Unlock on close is handled by the flush method */
 	if (fl->fl_flags & FL_CLOSE)
 		return 0;
-
-	FUSE_MIGHT_FREEZE(file->f_mapping->host->i_sb, "fuse_setlk");
 
 	req = fuse_get_req(fc);
 	if (IS_ERR(req))
@@ -1555,8 +1530,6 @@ static sector_t fuse_bmap(struct address_space *mapping, sector_t block)
 
 	if (!inode->i_sb->s_bdev || fc->no_bmap)
 		return 0;
-
-	FUSE_MIGHT_FREEZE(inode->i_sb, "fuse_bmap");
 
 	req = fuse_get_req(fc);
 	if (IS_ERR(req))

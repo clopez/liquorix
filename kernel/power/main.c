@@ -16,7 +16,6 @@
 #include "power.h"
 
 DEFINE_MUTEX(pm_mutex);
-EXPORT_SYMBOL_GPL(pm_mutex);
 
 unsigned int pm_flags;
 EXPORT_SYMBOL(pm_flags);
@@ -25,8 +24,7 @@ EXPORT_SYMBOL(pm_flags);
 
 /* Routines for PM-transition notifications */
 
-BLOCKING_NOTIFIER_HEAD(pm_chain_head);
-EXPORT_SYMBOL_GPL(pm_chain_head);
+static BLOCKING_NOTIFIER_HEAD(pm_chain_head);
 
 int register_pm_notifier(struct notifier_block *nb)
 {
@@ -45,7 +43,6 @@ int pm_notifier_call_chain(unsigned long val)
 	return (blocking_notifier_call_chain(&pm_chain_head, val, NULL)
 			== NOTIFY_BAD) ? -EINVAL : 0;
 }
-EXPORT_SYMBOL_GPL(pm_notifier_call_chain);
 
 /* If set, devices may be suspended and resumed asynchronously. */
 int pm_async_enabled = 1;
@@ -139,7 +136,6 @@ power_attr(pm_test);
 #endif /* CONFIG_PM_SLEEP */
 
 struct kobject *power_kobj;
-EXPORT_SYMBOL_GPL(power_kobj);
 
 /**
  *	state - control system power state.

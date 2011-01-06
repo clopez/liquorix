@@ -25,7 +25,6 @@
 unsigned long max_low_pfn;
 unsigned long min_low_pfn;
 unsigned long max_pfn;
-EXPORT_SYMBOL_GPL(max_pfn);
 
 #ifdef CONFIG_CRASH_DUMP
 /*

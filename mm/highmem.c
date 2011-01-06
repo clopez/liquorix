@@ -58,7 +58,6 @@ unsigned int nr_free_highpages (void)
 
 	return pages;
 }
-EXPORT_SYMBOL_GPL(nr_free_highpages);
 
 static int pkmap_count[LAST_PKMAP];
 static unsigned int last_pkmap_nr;
