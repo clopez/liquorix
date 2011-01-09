@@ -862,6 +862,7 @@ static void intel_dp_prepare(struct drm_encoder *encoder)
 
 	if (IS_eDP(intel_dp)) {
 		ironlake_edp_backlight_off(dev);
+		ironlake_edp_panel_off(dev);
 		ironlake_edp_panel_on(dev);
 		ironlake_edp_pll_on(encoder);
 	}
