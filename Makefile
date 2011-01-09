@@ -2,7 +2,7 @@ VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 36
 EXTRAVERSION =
-NAME = Mulberry Race Car
+NAME = Apoplectic Ant Eater
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
